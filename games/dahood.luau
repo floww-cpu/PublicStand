@@ -224,7 +224,7 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         for i = 2, #history do
             local prevLook = (history[i-1].cframe.LookVector * Vector3.new(1, 0, 1)).Unit
             local currLook = (history[i].cframe.LookVector * Vector3.new(1, 0, 1)).Unit
-            
+
             if prevLook.Magnitude > 0 and currLook.Magnitude > 0 then
                 local dotProduct = math.clamp(prevLook:Dot(currLook), -1, 1)
                 local angleChange = math.acos(dotProduct)
@@ -234,6 +234,37 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
 
         local duration = history[#history].time - history[1].time
         return duration > 0 and (totalAngleChange / duration) or 0
+    end
+
+    local function detectCircularMotion(history)
+        if not history or #history < 6 then
+            return false, 0
+        end
+
+        local positions = {}
+        for i = 1, #history do
+            positions[i] = history[i].position
+        end
+
+        local first = positions[1]
+        local last = positions[#positions]
+        local distanceFromStart = (last - first).Magnitude
+
+        local maxDist = 0
+        for i = 2, #positions - 1 do
+            local dist = (positions[i] - first).Magnitude
+            maxDist = math.max(maxDist, dist)
+        end
+
+        local totalDistance = 0
+        for i = 2, #history do
+            totalDistance += (history[i].position - history[i-1].position).Magnitude
+        end
+
+        local circularity = distanceFromStart > 0 and (totalDistance / distanceFromStart) or 0
+        local isCircular = circularity > 2.5 and maxDist > 2 and distanceFromStart < maxDist * 0.4
+
+        return isCircular, circularity
     end
 
     local function predictJumpArc(history, travelTime)
@@ -280,6 +311,7 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         local burstSpeed = getBurstSpeed(history)
         local isJumping, verticalVelocity = detectJumping(history)
         local turningRate = getTurningRate(history)
+        local isCircular, circularity = detectCircularMotion(history)
 
         local effectiveSpeed = instantaneousSpeed
         if averageSpeed then
@@ -297,6 +329,10 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
 
         if turningRate > 1.5 then
             travelTime = travelTime * 0.85
+        end
+
+        if isCircular then
+            travelTime = travelTime * 1.35
         end
 
         if isJumping then
@@ -327,11 +363,15 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
             desiredDistance = desiredDistance * 1.15
         end
 
+        if isCircular then
+            desiredDistance = desiredDistance * 1.3
+        end
+
         if turningRate > 2.0 then
             desiredDistance = desiredDistance * 0.9
         end
 
-        local maxDistance = 40
+        local maxDistance = 50
         desiredDistance = math.max(0, math.min(maxDistance, desiredDistance))
 
         local jumpOffset = Vector3.new()
@@ -479,7 +519,7 @@ local function quickPunches(targetPlayer)
         API.currentFollowTarget = targetPlayer
     end
     
-    local maxPunches = 50
+    local maxPunches = 25
     local punches = 0
     
     while punches < maxPunches and Stand.Attacking and not isKnockedOut(targetPlayer) do
@@ -500,7 +540,7 @@ local function quickPunches(targetPlayer)
             end
 
             combatTool:Activate()
-            task.wait(0.06)
+            task.wait(0.04)
             combatTool:Deactivate()
             
             return false
@@ -510,7 +550,7 @@ local function quickPunches(targetPlayer)
             break
         end
         
-        task.wait(0.1)
+        task.wait(0.06)
     end
     
     unequipTools()
@@ -533,7 +573,7 @@ local function chargedPunch(targetPlayer)
         return false
     end
     
-    local chargeTime = 1.5
+    local chargeTime = 0.75
     local startTime = tick()
     local positionIndex = 1
     
@@ -603,7 +643,7 @@ local function chargedPunch(targetPlayer)
     
     pcall(function() combatTool:Deactivate() end)
     
-    local maxAttempts = 25
+    local maxAttempts = 12
     local attempts = 0
     local knockSuccess = false
     
@@ -632,7 +672,7 @@ local function chargedPunch(targetPlayer)
             break
         end
         
-        task.wait(0.08)
+        task.wait(0.05)
         
         if isKnockedOut(targetPlayer) then
             knockSuccess = true
@@ -686,18 +726,14 @@ API.Create("knock", function(args)
     if mode == "light" then
         success = quickPunches(target)
     else
-        -- Keep retrying indefinitely until successful or manually stopped
-        while not success and not isKnockedOut(target) and Stand.Attacking do
+        -- Keep retrying with timeout to avoid prolonged lag
+        local commandStartTime = tick()
+        local maxCommandTime = 5
+        while not success and not isKnockedOut(target) and Stand.Attacking and (tick() - commandStartTime < maxCommandTime) do
             success = chargedPunch(target)
-            if not success then
-                -- Brief pause between attempts, but continue trying
-                for i = 1, 10 do
-                    task.wait(0.1)
-                    -- Check if we should stop (either target knocked out or stand stopped attacking)
-                    if isKnockedOut(target) or not Stand.Attacking then
-                        break
-                    end
-                end
+            if not success and not isKnockedOut(target) and Stand.Attacking then
+                -- Minimal pause between attempts for responsiveness
+                task.wait(0.2)
             end
         end
     end
@@ -810,4 +846,5 @@ task.spawn(function()
         end
     end)
     
+    print("[Da Hood Config] Fall protection initialized")
 end)
