@@ -354,9 +354,9 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         local desiredDistance = effectiveSpeed * travelTime
 
         if effectiveSpeed > 25 then
-            desiredDistance = desiredDistance + math.min((effectiveSpeed - 25) * 0.7, 18)
+            desiredDistance = desiredDistance + math.min((effectiveSpeed - 25) * 0.9, 24)
         elseif effectiveSpeed > 15 then
-            desiredDistance = desiredDistance + math.min((effectiveSpeed - 15) * 0.4, 8)
+            desiredDistance = desiredDistance + math.min((effectiveSpeed - 15) * 0.55, 12)
         end
 
         if isJumping then
@@ -370,8 +370,11 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         if turningRate > 2.0 then
             desiredDistance = desiredDistance * 0.9
         end
+        
+        -- Add flat distance boost for better prediction
+        desiredDistance = desiredDistance + 3
 
-        local maxDistance = 50
+        local maxDistance = 55
         desiredDistance = math.max(0, math.min(maxDistance, desiredDistance))
 
         local jumpOffset = Vector3.new()
@@ -751,6 +754,91 @@ API.Create("knock", function(args)
     API.currentFollowTarget = originalTarget
 end)
 
+-- Register the stomp command
+API.Create("stomp", function(args)
+    if #args < 1 then
+        return
+    end
+    
+    local playerName = table.concat(args, " ")
+    local target = (playerName == "" and API.ownerPlayer) or findPlayer(playerName)
+    
+    if not target then
+        return
+    end
+    
+    -- Save original state
+    local wasAttacking = Stand.Attacking
+    local wasFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
+    
+    -- Check if target is already knocked out
+    if not isKnockedOut(target) then
+        -- Knock them first
+        Stand.Attacking = true
+        Stand.Following = false
+        API.currentFollowTarget = nil
+        
+        local success = false
+        local knockStartTime = tick()
+        local maxKnockTime = 10
+        
+        while not success and not isKnockedOut(target) and Stand.Attacking and (tick() - knockStartTime < maxKnockTime) do
+            success = chargedPunch(target)
+            if not success and not isKnockedOut(target) and Stand.Attacking then
+                task.wait(0.2)
+            end
+        end
+        
+        if not isKnockedOut(target) then
+            -- Failed to knock out, restore state and exit
+            Stand.Attacking = wasAttacking
+            Stand.Following = wasFollowing
+            API.currentFollowTarget = originalTarget
+            return
+        end
+    end
+    
+    -- Target is now knocked out, proceed with stomp
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    
+    local stompSuccess = pcall(function()
+        local targetCharacter = target and target.Character
+        if not targetCharacter then return end
+        
+        local targetHRP = targetCharacter:FindFirstChild("HumanoidRootPart")
+        if not targetHRP then return end
+        
+        local hrp = getLocalHRP()
+        if not hrp then return end
+        
+        -- Teleport directly on top of the knocked out target
+        local targetPos = targetHRP.Position
+        hrp.CFrame = CFrame.new(targetPos.X, targetPos.Y + 3, targetPos.Z)
+        
+        task.wait(0.1)
+        
+        -- Press E using VirtualInputManager
+        local VirtualInputManager = game:GetService("VirtualInputManager")
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        
+        task.wait(0.2)
+    end)
+    
+    if stompSuccess then
+        API.sendChat("Stomped " .. target.Name)
+    end
+    
+    -- Restore original state
+    Stand.Attacking = wasAttacking
+    Stand.Following = wasFollowing
+    API.currentFollowTarget = originalTarget
+end)
+
 API.Notify({
     Title = "GAME CONFIG",
     Description = (game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name or "Game") .. " Loaded",
@@ -849,5 +937,5 @@ task.spawn(function()
         end
     end)
     
-    print("[Da Hood Config] protection initialized")
+    print("[Da Hood Config] Fall protection initialized")
 end)
