@@ -122,6 +122,149 @@ wrapAPIMethod("Summon", function(originalSummon)
     end
 end)
 
+wrapAPIMethod("getPredictedPosition", function(originalPredict)
+    local HISTORY_WINDOW = 0.45
+    local MAX_HISTORY = 20
+    local motionHistory = setmetatable({}, {__mode = "k"})
+
+    local function updateHistory(targetHRP)
+        if not targetHRP then
+            return nil
+        end
+
+        local history = motionHistory[targetHRP]
+        if not history then
+            history = {}
+            motionHistory[targetHRP] = history
+        end
+
+        local now = tick()
+        history[#history + 1] = {
+            position = targetHRP.Position,
+            velocity = targetHRP.AssemblyLinearVelocity,
+            time = now
+        }
+
+        while #history > MAX_HISTORY do
+            table.remove(history, 1)
+        end
+
+        while #history > 0 and (now - history[1].time) > HISTORY_WINDOW do
+            table.remove(history, 1)
+        end
+
+        return history
+    end
+
+    local function getAverageSpeed(history)
+        if not history or #history < 2 then
+            return nil
+        end
+
+        local totalDistance = 0
+        for i = 2, #history do
+            totalDistance += (history[i].position - history[i-1].position).Magnitude
+        end
+
+        local duration = history[#history].time - history[1].time
+        if duration <= 0 then
+            return nil
+        end
+
+        return totalDistance / duration
+    end
+
+    local function getBurstSpeed(history)
+        if not history or #history < 3 then
+            return nil
+        end
+
+        local last = history[#history]
+        local prev = history[#history - 1]
+        local prev2 = history[#history - 2]
+
+        local dt1 = math.max(prev.time - prev2.time, 1e-3)
+        local dt2 = math.max(last.time - prev.time, 1e-3)
+
+        local speed1 = (prev.position - prev2.position).Magnitude / dt1
+        local speed2 = (last.position - prev.position).Magnitude / dt2
+
+        return math.max(speed1, speed2)
+    end
+
+    return function(targetHRP, commandType)
+        local predictionType = commandType == "knock" and "punch" or commandType
+        local predictedPos, moveDirection = originalPredict(targetHRP, predictionType)
+
+        if not targetHRP then
+            return predictedPos, moveDirection
+        end
+
+        local history = updateHistory(targetHRP)
+
+        if commandType ~= "knock" then
+            return predictedPos, moveDirection
+        end
+
+        if not predictedPos or not moveDirection then
+            return predictedPos, moveDirection
+        end
+
+        local directionMagnitude = moveDirection.Magnitude
+        if directionMagnitude == 0 then
+            return predictedPos, moveDirection
+        end
+
+        local velocity = targetHRP.AssemblyLinearVelocity
+        local instantaneousSpeed = velocity.Magnitude
+        local averageSpeed = getAverageSpeed(history)
+        local burstSpeed = getBurstSpeed(history)
+
+        local effectiveSpeed = instantaneousSpeed
+        if averageSpeed then
+            effectiveSpeed = (effectiveSpeed * 0.5) + (averageSpeed * 0.5)
+        end
+
+        if burstSpeed and burstSpeed > effectiveSpeed then
+            effectiveSpeed = (effectiveSpeed * 0.35) + (burstSpeed * 0.65)
+        end
+
+        local targetPlayer = Players:GetPlayerFromCharacter(targetHRP.Parent)
+        local ping = targetPlayer and targetPlayer:GetNetworkPing() or 0.17
+
+        local travelTime = 0.2 + (ping * 1.35)
+
+        if history and #history >= 4 then
+            local newest = history[#history]
+            local windowStart = history[#history - 3]
+            local elapsed = math.max(newest.time - windowStart.time, 1e-3)
+            local displacement = (newest.position - windowStart.position).Magnitude
+            local windowSpeed = displacement / elapsed
+
+            if windowSpeed > effectiveSpeed then
+                travelTime = travelTime + math.min((windowSpeed - effectiveSpeed) * 0.007, 0.18)
+            end
+        end
+
+        local desiredDistance = effectiveSpeed * travelTime
+
+        if effectiveSpeed > 20 then
+            desiredDistance = desiredDistance + math.min((effectiveSpeed - 20) * 0.5, 12)
+        end
+
+        local maxDistance = 32
+        desiredDistance = math.max(0, math.min(maxDistance, desiredDistance))
+
+        local currentDistance = (predictedPos - targetHRP.Position).Magnitude
+        if desiredDistance > currentDistance then
+            local normalizedDirection = moveDirection / directionMagnitude
+            predictedPos = targetHRP.Position + (normalizedDirection * desiredDistance)
+        end
+
+        return predictedPos, moveDirection
+    end
+end)
+
 -- Helper functions
 local function getLocalCharacter()
     local success, result = pcall(function()
@@ -263,7 +406,7 @@ local function quickPunches(targetPlayer)
             local targetHRP = targetCharacter:FindFirstChild("HumanoidRootPart")
             if not targetHRP then return true end
             
-            local predictedPos, moveDirection = getPredictedPosition(targetHRP, "punch")
+            local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
             
             local hrp = getLocalHRP()
             if predictedPos and hrp then
@@ -364,7 +507,7 @@ local function chargedPunch(targetPlayer)
     Stand.Attacking = true
     
     pcall(function()
-        local predictedPos, moveDirection = getPredictedPosition(targetHRP, "punch")
+        local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
         
         local hrp = getLocalHRP()
         if predictedPos and hrp then
@@ -388,7 +531,7 @@ local function chargedPunch(targetPlayer)
             local loopHRP = loopCharacter:FindFirstChild("HumanoidRootPart")
             if not loopHRP then return end
             
-            local newPredictedPos, newMoveDirection = getPredictedPosition(loopHRP, "punch")
+            local newPredictedPos, newMoveDirection = getPredictedPosition(loopHRP, "knock")
             local hrp = getLocalHRP()
             if newPredictedPos and hrp then
                 hrp.CFrame = CFrame.new(newPredictedPos + (newMoveDirection * 6), newPredictedPos)
@@ -446,9 +589,11 @@ API.Create("knock", function(args)
     
     local wasAttacking = Stand.Attacking
     local wasFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
     
     Stand.Attacking = true
     Stand.Following = false
+    API.currentFollowTarget = nil
     
     local success = false
     
@@ -471,10 +616,10 @@ API.Create("knock", function(args)
         API.sendChat("Knocked out " .. target.Name)
     end
     
-    if not success then
-        Stand.Attacking = wasAttacking
-        Stand.Following = wasFollowing
-    end
+    -- Restore original state regardless of success
+    Stand.Attacking = wasAttacking
+    Stand.Following = wasFollowing
+    API.currentFollowTarget = originalTarget
 end)
 
 API.Notify({
