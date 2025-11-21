@@ -810,5 +810,4 @@ task.spawn(function()
         end
     end)
     
-    print("[Da Hood Config] Fall protection initialized")
 end)
