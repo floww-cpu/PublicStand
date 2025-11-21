@@ -123,8 +123,8 @@ wrapAPIMethod("Summon", function(originalSummon)
 end)
 
 wrapAPIMethod("getPredictedPosition", function(originalPredict)
-    local HISTORY_WINDOW = 0.45
-    local MAX_HISTORY = 20
+    local HISTORY_WINDOW = 0.6
+    local MAX_HISTORY = 30
     local motionHistory = setmetatable({}, {__mode = "k"})
 
     local function updateHistory(targetHRP)
@@ -139,9 +139,13 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         end
 
         local now = tick()
+        local currentCFrame = targetHRP.CFrame
+        
         history[#history + 1] = {
             position = targetHRP.Position,
             velocity = targetHRP.AssemblyLinearVelocity,
+            angularVelocity = targetHRP.AssemblyAngularVelocity,
+            cframe = currentCFrame,
             time = now
         }
 
@@ -192,6 +196,61 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         return math.max(speed1, speed2)
     end
 
+    local function detectJumping(history)
+        if not history or #history < 4 then
+            return false, 0
+        end
+
+        local recent = history[#history]
+        local older = history[#history - 3]
+        
+        local verticalVelocity = recent.velocity.Y
+        local verticalChange = recent.position.Y - older.position
+        local timeDiff = recent.time - older.time
+        
+        if verticalVelocity > 8 or verticalChange > 5 then
+            return true, verticalVelocity
+        end
+        
+        return false, verticalVelocity
+    end
+
+    local function getTurningRate(history)
+        if not history or #history < 3 then
+            return 0
+        end
+
+        local totalAngleChange = 0
+        for i = 2, #history do
+            local prevLook = (history[i-1].cframe.LookVector * Vector3.new(1, 0, 1)).Unit
+            local currLook = (history[i].cframe.LookVector * Vector3.new(1, 0, 1)).Unit
+            
+            if prevLook.Magnitude > 0 and currLook.Magnitude > 0 then
+                local dotProduct = math.clamp(prevLook:Dot(currLook), -1, 1)
+                local angleChange = math.acos(dotProduct)
+                totalAngleChange += angleChange
+            end
+        end
+
+        local duration = history[#history].time - history[1].time
+        return duration > 0 and (totalAngleChange / duration) or 0
+    end
+
+    local function predictJumpArc(history, travelTime)
+        if not history or #history < 2 then
+            return Vector3.new()
+        end
+
+        local latest = history[#history]
+        local initialPos = latest.position
+        local initialVelocity = latest.velocity
+        
+        local gravity = 196.2
+        local predictedY = initialPos.Y + (initialVelocity.Y * travelTime) - (0.5 * gravity * travelTime * travelTime)
+        
+        return Vector3.new(0, predictedY - initialPos.Y, 0)
+    end
+
     return function(targetHRP, commandType)
         local predictionType = commandType == "knock" and "punch" or commandType
         local predictedPos, moveDirection = originalPredict(targetHRP, predictionType)
@@ -219,20 +278,30 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         local instantaneousSpeed = velocity.Magnitude
         local averageSpeed = getAverageSpeed(history)
         local burstSpeed = getBurstSpeed(history)
+        local isJumping, verticalVelocity = detectJumping(history)
+        local turningRate = getTurningRate(history)
 
         local effectiveSpeed = instantaneousSpeed
         if averageSpeed then
-            effectiveSpeed = (effectiveSpeed * 0.5) + (averageSpeed * 0.5)
+            effectiveSpeed = (effectiveSpeed * 0.4) + (averageSpeed * 0.6)
         end
 
         if burstSpeed and burstSpeed > effectiveSpeed then
-            effectiveSpeed = (effectiveSpeed * 0.35) + (burstSpeed * 0.65)
+            effectiveSpeed = (effectiveSpeed * 0.25) + (burstSpeed * 0.75)
         end
 
         local targetPlayer = Players:GetPlayerFromCharacter(targetHRP.Parent)
         local ping = targetPlayer and targetPlayer:GetNetworkPing() or 0.17
 
-        local travelTime = 0.2 + (ping * 1.35)
+        local travelTime = 0.25 + (ping * 1.5)
+
+        if turningRate > 1.5 then
+            travelTime = travelTime * 0.85
+        end
+
+        if isJumping then
+            travelTime = travelTime * 1.2
+        end
 
         if history and #history >= 4 then
             local newest = history[#history]
@@ -242,23 +311,40 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
             local windowSpeed = displacement / elapsed
 
             if windowSpeed > effectiveSpeed then
-                travelTime = travelTime + math.min((windowSpeed - effectiveSpeed) * 0.007, 0.18)
+                travelTime = travelTime + math.min((windowSpeed - effectiveSpeed) * 0.008, 0.25)
             end
         end
 
         local desiredDistance = effectiveSpeed * travelTime
 
-        if effectiveSpeed > 20 then
-            desiredDistance = desiredDistance + math.min((effectiveSpeed - 20) * 0.5, 12)
+        if effectiveSpeed > 25 then
+            desiredDistance = desiredDistance + math.min((effectiveSpeed - 25) * 0.7, 18)
+        elseif effectiveSpeed > 15 then
+            desiredDistance = desiredDistance + math.min((effectiveSpeed - 15) * 0.4, 8)
         end
 
-        local maxDistance = 32
+        if isJumping then
+            desiredDistance = desiredDistance * 1.15
+        end
+
+        if turningRate > 2.0 then
+            desiredDistance = desiredDistance * 0.9
+        end
+
+        local maxDistance = 40
         desiredDistance = math.max(0, math.min(maxDistance, desiredDistance))
+
+        local jumpOffset = Vector3.new()
+        if isJumping then
+            jumpOffset = predictJumpArc(history, travelTime)
+        end
 
         local currentDistance = (predictedPos - targetHRP.Position).Magnitude
         if desiredDistance > currentDistance then
             local normalizedDirection = moveDirection / directionMagnitude
-            predictedPos = targetHRP.Position + (normalizedDirection * desiredDistance)
+            predictedPos = targetHRP.Position + (normalizedDirection * desiredDistance) + jumpOffset
+        else
+            predictedPos = predictedPos + jumpOffset
         end
 
         return predictedPos, moveDirection
@@ -600,14 +686,18 @@ API.Create("knock", function(args)
     if mode == "light" then
         success = quickPunches(target)
     else
-        local attempts = 0
-        local maxAttempts = 2
-        
-        while not success and attempts < maxAttempts and not isKnockedOut(target) do
-            attempts = attempts + 1
+        -- Keep retrying indefinitely until successful or manually stopped
+        while not success and not isKnockedOut(target) and Stand.Attacking do
             success = chargedPunch(target)
-            if not success and attempts < maxAttempts then
-                task.wait(0.5)
+            if not success then
+                -- Brief pause between attempts, but continue trying
+                for i = 1, 10 do
+                    task.wait(0.1)
+                    -- Check if we should stop (either target knocked out or stand stopped attacking)
+                    if isKnockedOut(target) or not Stand.Attacking then
+                        break
+                    end
+                end
             end
         end
     end
