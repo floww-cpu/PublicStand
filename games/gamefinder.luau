@@ -2,9 +2,7 @@ getgenv().SocietyStandAPI = getgenv().SocietyStandAPI or {}
 local gameId = game.GameId
 
 local scripts = {
-    [10449761463] = "https://xehh0.github.io/games/thestrongestb.luau", -- the strongest battlegrounds
-    [3808081382] = "https://xehh0.github.io/games/thestrongestb.luau", -- the strongest battlegrounds
-    [2788229376] = "https://xehh0.github.io/games/dahood.luau", -- game with anticheat bypass
+    [2788229376] = "https://xehh0.github.io/games/dahood.luau", -- dahood
 }
 
 
