@@ -20,6 +20,7 @@ end
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local Stand = API.Stand
 
@@ -32,6 +33,48 @@ end
 if not LocalPlayer then
     Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
     LocalPlayer = Players.LocalPlayer
+end
+
+local function installCheckerBypass()
+    if getgenv().SocietyStandDaHoodCheckerBypass then
+        return
+    end
+
+    local hookMeta = hookmetamethod
+    local getNamecallMethod = getnamecallmethod
+    local checkCaller = checkcaller
+
+    if type(hookMeta) ~= "function" or type(getNamecallMethod) ~= "function" or type(checkCaller) ~= "function" then
+        return
+    end
+
+    local ok, mainEvent = pcall(function()
+        return ReplicatedStorage:WaitForChild("MainEvent", 5)
+    end)
+
+    if not ok or not mainEvent then
+        return
+    end
+
+    local oldNamecall
+    oldNamecall = hookMeta(game, "__namecall", function(self, ...)
+        local method = getNamecallMethod()
+        if not checkCaller() and self == mainEvent and method == "FireServer" then
+            local args = {...}
+            if args[1] == "CHECKER_1" then
+                return nil
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+
+    getgenv().SocietyStandDaHoodCheckerBypass = true
+    print("[Da Hood Config] CHECKER_1 anticheat bypass active")
+end
+
+local bypassSuccess, bypassError = pcall(installCheckerBypass)
+if not bypassSuccess and bypassError then
+    warn("[Da Hood Config] Failed to install CHECKER_1 bypass:", bypassError)
 end
 
 -- Detected functions that trigger anticheat - these must be completely avoided
@@ -325,7 +368,8 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         local targetPlayer = Players:GetPlayerFromCharacter(targetHRP.Parent)
         local ping = targetPlayer and targetPlayer:GetNetworkPing() or 0.17
 
-        local travelTime = 0.25 + (ping * 1.5)
+        -- Reduced base travel time and ping multiplier for better responsiveness
+        local travelTime = 0.15 + (ping * 0.8)
 
         if turningRate > 1.5 then
             travelTime = travelTime * 0.85
@@ -371,8 +415,8 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
             desiredDistance = desiredDistance * 0.9
         end
         
-        -- Add flat distance boost for better prediction
-        desiredDistance = desiredDistance + 3
+        -- Add flat distance boost for better prediction (increased for walking lag)
+        desiredDistance = desiredDistance + 5
 
         local maxDistance = 55
         desiredDistance = math.max(0, math.min(maxDistance, desiredDistance))
@@ -773,23 +817,25 @@ API.Create("stomp", function(args)
     local originalTarget = API.currentFollowTarget
     
     -- Check if target is already knocked out
+    local knockSuccessful = false
+
     if not isKnockedOut(target) then
         -- Knock them first
         Stand.Attacking = true
         Stand.Following = false
         API.currentFollowTarget = nil
-        
+
         local success = false
         local knockStartTime = tick()
         local maxKnockTime = 10
-        
+
         while not success and not isKnockedOut(target) and Stand.Attacking and (tick() - knockStartTime < maxKnockTime) do
             success = chargedPunch(target)
             if not success and not isKnockedOut(target) and Stand.Attacking then
                 task.wait(0.2)
             end
         end
-        
+
         if not isKnockedOut(target) then
             -- Failed to knock out, restore state and exit
             Stand.Attacking = wasAttacking
@@ -797,6 +843,8 @@ API.Create("stomp", function(args)
             API.currentFollowTarget = originalTarget
             return
         end
+
+        knockSuccessful = true
     end
     
     -- Target is now knocked out, proceed with stomp
@@ -804,18 +852,23 @@ API.Create("stomp", function(args)
     Stand.Following = false
     API.currentFollowTarget = nil
     
+    -- If we just knocked them out, wait for the body to fall
+    if knockSuccessful then
+        task.wait(0.3)
+    end
+    
     local stompSuccess = pcall(function()
         local targetCharacter = target and target.Character
         if not targetCharacter then return end
         
-        local targetHRP = targetCharacter:FindFirstChild("HumanoidRootPart")
-        if not targetHRP then return end
+        local targetTorso = targetCharacter:FindFirstChild("UpperTorso") or targetCharacter:FindFirstChild("Torso") or targetCharacter:FindFirstChild("HumanoidRootPart")
+        if not targetTorso then return end
         
         local hrp = getLocalHRP()
         if not hrp then return end
         
         -- Teleport directly on top of the knocked out target
-        local targetPos = targetHRP.Position
+        local targetPos = targetTorso.Position
         hrp.CFrame = CFrame.new(targetPos.X, targetPos.Y + 3, targetPos.Z)
         
         task.wait(0.1)
