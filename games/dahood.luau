@@ -519,7 +519,7 @@ local function quickPunches(targetPlayer)
         API.currentFollowTarget = targetPlayer
     end
     
-    local maxPunches = 25
+    local maxPunches = 50
     local punches = 0
     
     while punches < maxPunches and Stand.Attacking and not isKnockedOut(targetPlayer) do
@@ -540,7 +540,7 @@ local function quickPunches(targetPlayer)
             end
 
             combatTool:Activate()
-            task.wait(0.04)
+            task.wait(0.06)
             combatTool:Deactivate()
             
             return false
@@ -550,7 +550,7 @@ local function quickPunches(targetPlayer)
             break
         end
         
-        task.wait(0.06)
+        task.wait(0.1)
     end
     
     unequipTools()
@@ -573,7 +573,7 @@ local function chargedPunch(targetPlayer)
         return false
     end
     
-    local chargeTime = 0.75
+    local chargeTime = 1.5
     local startTime = tick()
     local positionIndex = 1
     
@@ -643,7 +643,7 @@ local function chargedPunch(targetPlayer)
     
     pcall(function() combatTool:Deactivate() end)
     
-    local maxAttempts = 12
+    local maxAttempts = 25
     local attempts = 0
     local knockSuccess = false
     
@@ -664,7 +664,7 @@ local function chargedPunch(targetPlayer)
             end
             
             combatTool:Activate()
-            task.wait(0.03)
+            task.wait(0.06)
             combatTool:Deactivate()
         end)
         
@@ -672,7 +672,7 @@ local function chargedPunch(targetPlayer)
             break
         end
         
-        task.wait(0.05)
+        task.wait(0.08)
         
         if isKnockedOut(targetPlayer) then
             knockSuccess = true
@@ -732,8 +732,11 @@ API.Create("knock", function(args)
         while not success and not isKnockedOut(target) and Stand.Attacking and (tick() - commandStartTime < maxCommandTime) do
             success = chargedPunch(target)
             if not success and not isKnockedOut(target) and Stand.Attacking then
-                -- Minimal pause between attempts for responsiveness
-                task.wait(0.2)
+                -- Pause between attempts
+                for i = 1, 10 do
+                    if not Stand.Attacking then break end
+                    task.wait(0.1)
+                end
             end
         end
     end
@@ -846,5 +849,5 @@ task.spawn(function()
         end
     end)
     
-    print("[Da Hood Config] Fall protection initialized")
+    print("[Da Hood Config] protection initialized")
 end)
