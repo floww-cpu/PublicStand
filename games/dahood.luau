@@ -415,8 +415,28 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
             desiredDistance = desiredDistance * 0.9
         end
         
-        -- Add flat distance boost for better prediction (increased for walking lag)
-        desiredDistance = desiredDistance + 5
+        -- Adaptive distance boost based on movement state
+        local distanceBoost = 0
+        local isStanding = effectiveSpeed < 0.5
+        local isWalkingSlow = effectiveSpeed >= 0.5 and effectiveSpeed < 8
+        local isWalkingNormal = effectiveSpeed >= 8 and effectiveSpeed < 15
+        local isMovingFast = effectiveSpeed >= 15
+        
+        if not isStanding then
+            if isWalkingSlow then
+                -- Walking slowly: add significant boost (7-8 studs) to compensate for lag
+                distanceBoost = 7 + math.min(effectiveSpeed * 0.15, 1)
+            elseif isWalkingNormal then
+                -- Normal walking: add moderate boost (5-6 studs)
+                distanceBoost = 5 + math.min((effectiveSpeed - 8) * 0.2, 1.4)
+            elseif isMovingFast then
+                -- Fast movement: add smaller boost (3-4 studs) since distance bonuses above handle it
+                distanceBoost = 3 + math.min((effectiveSpeed - 15) * 0.05, 1)
+            end
+        end
+        -- If standing still (effectiveSpeed < 0.5), distanceBoost remains 0
+        
+        desiredDistance = desiredDistance + distanceBoost
 
         local maxDistance = 55
         desiredDistance = math.max(0, math.min(maxDistance, desiredDistance))
