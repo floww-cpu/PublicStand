@@ -2,7 +2,7 @@ getgenv().SocietyStandAPI = getgenv().SocietyStandAPI or {}
 local gameId = game.GameId
 
 local scripts = {
-    [2788229376] = "https://xehh0.github.io/games/dahood.luau", -- dahood
+    [2788229376] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/dahood.luau", -- dahood
 }
 
 
