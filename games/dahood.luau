@@ -580,6 +580,9 @@ local function quickPunches(targetPlayer)
         return false
     end
     
+    local previousManualControl = Stand.ManualControl
+    Stand.ManualControl = true
+    
     if API.Commands and API.Commands["frame"] then
         API.Commands["frame"]({targetPlayer.Name})
     else
@@ -621,6 +624,7 @@ local function quickPunches(targetPlayer)
     end
     
     unequipTools()
+    Stand.ManualControl = previousManualControl
     return isKnockedOut(targetPlayer)
 end
 
@@ -648,8 +652,17 @@ local function chargedPunch(targetPlayer)
     
     local wasAttacking = Stand.Attacking
     local wasFollowing = Stand.Following
+    local wasManualControl = Stand.ManualControl
     local originalTarget = API.currentFollowTarget
+    local function restoreState()
+        Stand.Attacking = wasAttacking
+        Stand.Following = wasFollowing
+        Stand.ManualControl = wasManualControl
+        API.currentFollowTarget = originalTarget
+    end
     
+    -- Enable manual control to bypass MoveStand function
+    Stand.ManualControl = true
     Stand.Attacking = false
     Stand.Following = false
     API.currentFollowTarget = nil
@@ -658,9 +671,7 @@ local function chargedPunch(targetPlayer)
         if isKnockedOut(targetPlayer) then
             pcall(function() combatTool:Deactivate() end)
             unequipTools()
-            Stand.Attacking = wasAttacking
-            Stand.Following = wasFollowing
-            API.currentFollowTarget = originalTarget
+            restoreState()
             return true
         end
         
@@ -684,9 +695,7 @@ local function chargedPunch(targetPlayer)
     if not success or not targetHRP then
         pcall(function() combatTool:Deactivate() end)
         unequipTools()
-        Stand.Attacking = wasAttacking
-        Stand.Following = wasFollowing
-        API.currentFollowTarget = originalTarget
+        restoreState()
         return false
     end
     
@@ -696,8 +705,9 @@ local function chargedPunch(targetPlayer)
         API.currentFollowTarget = targetPlayer
     end
     
-    Stand.Following = true
-    Stand.Attacking = true
+    -- Keep ManualControl = true and Attacking/Following = false for custom predictor
+    Stand.Following = false
+    Stand.Attacking = false
     
     pcall(function()
         local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
@@ -749,9 +759,7 @@ local function chargedPunch(targetPlayer)
     
     unequipTools()
     
-    Stand.Attacking = wasAttacking
-    Stand.Following = wasFollowing
-    API.currentFollowTarget = originalTarget
+    restoreState()
     
     return knockSuccess
 end
