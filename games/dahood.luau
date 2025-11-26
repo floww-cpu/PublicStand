@@ -251,8 +251,227 @@ local function Hit()
     return success
 end
 
+local GUN_NAME = "[LMG]"
+local LMG_SHOP_ITEM = "[LMG] - $3978"
+local LMG_AMMO_ITEM = "200 [LMG Ammo] - $318"
+local ShopFolder
+
+local function getShopFolder()
+    if ShopFolder and ShopFolder.Parent then
+        return ShopFolder
+    end
+    local ignored = Workspace:FindFirstChild("Ignored")
+    if not ignored then
+        return nil
+    end
+    ShopFolder = ignored:FindFirstChild("Shop")
+    return ShopFolder
+end
+
+local function hasTool(toolName)
+    local character = getLocalCharacter()
+    if character and character:FindFirstChild(toolName) then
+        return true
+    end
+    local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+    if backpack and backpack:FindFirstChild(toolName) then
+        return true
+    end
+    return false
+end
+
+local function getTool(toolName)
+    local character = getLocalCharacter()
+    if character and character:FindFirstChild(toolName) then
+        return character:FindFirstChild(toolName)
+    end
+    local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        return backpack:FindFirstChild(toolName)
+    end
+    return nil
+end
+
+local function ensureToolEquipped(toolName)
+    local character = getLocalCharacter()
+    if not character then return nil end
+    local tool = character:FindFirstChild(toolName)
+    if tool then
+        return tool
+    end
+    local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        tool = backpack:FindFirstChild(toolName)
+        if tool then
+            tool.Parent = character
+            task.wait()
+            return tool
+        end
+    end
+    return nil
+end
+
+local function getClickDetectorFunc()
+    if typeof(fireclickdetector) == "function" then
+        return fireclickdetector
+    end
+    local env = (typeof(getgenv) == "function") and getgenv()
+    if env and typeof(env.fireclickdetector) == "function" then
+        return env.fireclickdetector
+    end
+    return nil
+end
+
+local function buyShopItem(shopItemName, expectedToolName, attempts)
+    local shopFolder = getShopFolder()
+    if not shopFolder then
+        return false, "Shop folder missing"
+    end
+    local shopItem = shopFolder:FindFirstChild(shopItemName)
+    if not shopItem then
+        return false, "Shop item '" .. shopItemName .. "' not found"
+    end
+    local head = shopItem:FindFirstChild("Head")
+    local detector = shopItem:FindFirstChild("ClickDetector")
+    if not head or not detector then
+        return false, "Shop item incomplete"
+    end
+    local hrp = getLocalHRP()
+    if not hrp then
+        return false, "HumanoidRootPart missing"
+    end
+    local originalCFrame
+    pcall(function()
+        originalCFrame = hrp.CFrame
+        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
+    end)
+    task.wait(0.15)
+    local clickFunction = getClickDetectorFunc()
+    if not clickFunction then
+        pcall(function()
+            if originalCFrame then
+                hrp.CFrame = originalCFrame
+            end
+        end)
+        return false, "fireclickdetector unavailable"
+    end
+    local success = false
+    local attemptsCount = attempts or 5
+    for _ = 1, attemptsCount do
+        pcall(function()
+            clickFunction(detector)
+        end)
+        task.wait(0.2)
+        if not expectedToolName or hasTool(expectedToolName) then
+            success = true
+            break
+        end
+    end
+    pcall(function()
+        if originalCFrame then
+            hrp.CFrame = originalCFrame
+        end
+    end)
+    return success, success and "Purchased" or "Purchase failed"
+end
+
+local function buyLMG(ammoPurchases)
+    local success, message = buyShopItem(LMG_SHOP_ITEM, GUN_NAME, 8)
+    if not success then
+        return false, message
+    end
+    local purchases = ammoPurchases or 6
+    for _ = 1, purchases do
+        buyShopItem(LMG_AMMO_ITEM, nil, 1)
+    end
+    return true
+end
+
 -- MainEvent reference
 local MainEvent = ReplicatedStorage:WaitForChild("MainEvent", 5)
+
+local ZERO_VECTOR = Vector3.new(0, 0, 0)
+
+local function shootTargetWithGun(target, gun)
+    if not target or not gun or not MainEvent then
+        return false
+    end
+    local handle = gun:FindFirstChild("Handle")
+    local head = target.Character and target.Character:FindFirstChild("Head")
+    if not handle or not head then
+        return false
+    end
+    pcall(function()
+        MainEvent:FireServer("ShootGun", handle, handle.Position, head.Position, head, ZERO_VECTOR)
+    end)
+    return true
+end
+
+local function reloadGunIfNeeded(gun)
+    if not gun or not MainEvent then return end
+    local ammo = gun:FindFirstChild("Ammo")
+    if ammo and ammo.Value <= 0 then
+        MainEvent:FireServer("Reload", gun)
+    end
+end
+
+local function gunKnockTarget(target, options)
+    options = options or {}
+    local timeout = options.timeout or 30
+    local gunName = options.gunName or GUN_NAME
+    local targetKO = KO(target)
+    if not targetKO then
+        return false, "invalid target"
+    end
+    local startTime = tick()
+    while target.Character and not isDead(target) and targetKO.Value == false do
+        if tick() - startTime > timeout then
+            return false, "timeout"
+        end
+        local gun = ensureToolEquipped(gunName)
+        if not gun then
+            return false, "missing weapon"
+        end
+        local shotSuccess = shootTargetWithGun(target, gun)
+        if not shotSuccess then
+            return false, "failed to shoot"
+        end
+        reloadGunIfNeeded(gun)
+        RunService.Heartbeat:Wait()
+    end
+    return targetKO.Value == true, targetKO.Value and "Target knocked" or "Target lost"
+end
+
+local function stompTarget(target)
+    local targetTorso = getTorso(target)
+    local myHRP = getLocalHRP()
+    if not targetTorso or not myHRP or not MainEvent then
+        return false
+    end
+    local success = pcall(function()
+        myHRP.CFrame = CFrame.new(targetTorso.Position + Vector3.new(0, 5, 0))
+        task.wait(0.1)
+        MainEvent:FireServer("Stomp")
+    end)
+    return success
+end
+
+local function resolveTargetFromArgs(args)
+    local playerName = table.concat(args, " ")
+    local target = (playerName == "" and API.ownerPlayer) or API.getPlayer(playerName)
+    if target then
+        return target, playerName
+    end
+    local lowerName = playerName:lower()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and 
+           (player.Name:lower():find(lowerName, 1, true) or 
+           (player.DisplayName and player.DisplayName:lower():find(lowerName, 1, true))) then
+            return player, playerName
+        end
+    end
+    return nil, playerName
+end
 
 -- AutoPredic value (prediction multiplier)
 local AutoPredic = 0.155
@@ -429,6 +648,12 @@ API.Create("knock", function(args)
         if targetKO.Value == true then
             API.sendChat(target.Name .. " has been knocked out!")
         end
+        
+        -- Return to owner (summon)
+        if API.Summon then
+            task.wait(0.5)
+            API.Summon()
+        end
     end)
 end)
 
@@ -565,6 +790,132 @@ API.Create("stomp", function(args)
     end)
 end)
 
+-- Gun command (buys LMG)
+API.Create("gun", function(args)
+    API.sendChat("Buying LMG...")
+    Stand.Attacking = false
+    Stand.Following = false
+    task.spawn(function()
+        local success, msg = buyLMG(8)
+        if success then
+            API.sendChat("LMG purchased with ammo!")
+            local ownerRoot = getRoot(API.ownerPlayer)
+            local myHRP = getLocalHRP()
+            if ownerRoot and myHRP then
+                pcall(function()
+                    myHRP.CFrame = ownerRoot.CFrame * CFrame.new(0, 2, 3)
+                end)
+            end
+            task.wait(0.3)
+            Stand.Following = true
+        else
+            API.sendChat("Failed to buy LMG: " .. (msg or "unknown error"))
+        end
+    end)
+end)
+
+-- GKnock command (gun knock using ShootGun)
+API.Create("gknock", function(args)
+    local target, playerName = resolveTargetFromArgs(args)
+    if not target or not target.Character then
+        API.sendChat("Target not found!")
+        return
+    end
+    if isDead(target) then
+        API.sendChat("Target is already dead!")
+        return
+    end
+    local targetKO = KO(target)
+    if not targetKO then
+        API.sendChat("Target invalid!")
+        return
+    end
+    if targetKO.Value == true then
+        API.sendChat(target.Name .. " is already knocked out!")
+        return
+    end
+    local tool = ensureToolEquipped(GUN_NAME)
+    if not tool then
+        API.sendChat("No LMG found! Use 'gun' command first.")
+        return
+    end
+    local originalFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    API.sendChat("Gun knocking " .. target.Name .. "...")
+    task.spawn(function()
+        local success, msg = gunKnockTarget(target, {timeout = 30, gunName = GUN_NAME})
+        Stand.Following = originalFollowing
+        API.currentFollowTarget = originalTarget
+        if success then
+            API.sendChat(target.Name .. " has been gun knocked out!")
+        else
+            API.sendChat("GKnock " .. (msg or "failed"))
+        end
+        if API.Summon then
+            task.wait(0.5)
+            API.Summon()
+        end
+    end)
+end)
+
+-- GStomp command (gun stomp using ShootGun)
+API.Create("gstomp", function(args)
+    local target, playerName = resolveTargetFromArgs(args)
+    if not target or not target.Character then
+        API.sendChat("Target not found!")
+        return
+    end
+    if isDead(target) then
+        API.sendChat("Target is already dead!")
+        return
+    end
+    local targetKO = KO(target)
+    if not targetKO then
+        API.sendChat("Target invalid!")
+        return
+    end
+    local tool = ensureToolEquipped(GUN_NAME)
+    if not tool then
+        API.sendChat("No LMG found! Use 'gun' command first.")
+        return
+    end
+    local originalFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    API.sendChat("Gun stomping " .. target.Name .. "...")
+    task.spawn(function()
+        if targetKO.Value == false then
+            local success, msg = gunKnockTarget(target, {timeout = 30, gunName = GUN_NAME})
+            if not success then
+                API.sendChat("Failed to knock: " .. (msg or "unknown"))
+                Stand.Following = originalFollowing
+                API.currentFollowTarget = originalTarget
+                return
+            end
+        end
+        if targetKO.Value == true and not isDead(target) then
+            stompTarget(target)
+            task.wait(0.5)
+            if isDead(target) then
+                API.sendChat(target.Name .. " has been gun stomped!")
+            else
+                API.sendChat("Stomped " .. target.Name)
+            end
+        end
+        Stand.Following = originalFollowing
+        API.currentFollowTarget = originalTarget
+        if API.Summon then
+            task.wait(0.5)
+            API.Summon()
+        end
+    end)
+end)
+
 -- Chair destroyer (from memory - prevents stand from sitting)
 task.spawn(function()
     task.wait(2)
@@ -609,5 +960,5 @@ task.spawn(function()
 end)
 
 print("[Da Hood Config] Loaded successfully!")
-print("[Da Hood Config] Commands: knock <player>, stomp <player>")
-print("[Da Hood Config] Prediction: 0.155 (AutoPredic)")
+print("[Da Hood Config] Commands: knock <player>, stomp <player>, gun, gknock <player>, gstomp <player>")
+print("[Da Hood Config] Prediction: 0.155 (AutoPredic from stando script)")
