@@ -23,6 +23,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local Stand = API.Stand
+local getPredictedPosition = API.getPredictedPosition
 
 -- Function to safely get LocalPlayer (handles reconnection scenarios)
 local function getLocalPlayer()
@@ -659,6 +660,105 @@ local function unequipTools()
     end)
 end
 
+local function updateStandPosition(targetPlayer, commandType)
+    local targetCharacter = targetPlayer and targetPlayer.Character
+    if not targetCharacter then return end
+    
+    local targetHRP = targetCharacter:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return end
+    
+    local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
+    if not targetHumanoid then return end
+    
+    local hrp = getLocalHRP()
+    if not hrp then return end
+    
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
+    
+    local inVehicle, vehicle = isInVehicle(targetPlayer)
+    
+    if inVehicle and vehicle then
+        local vehiclePos
+        local vehicleVel = Vector3.zero
+        
+        if typeof(vehicle.GetPivot) == "function" then
+            local ok, pivotCF = pcall(vehicle.GetPivot, vehicle)
+            if ok and typeof(pivotCF) == "CFrame" then
+                vehiclePos = pivotCF.Position
+                if typeof(vehicle.GetVelocityAtPosition) == "function" then
+                    local velOk, vel = pcall(vehicle.GetVelocityAtPosition, vehicle, pivotCF.Position)
+                    if velOk then
+                        vehicleVel = vel
+                    end
+                end
+            end
+        end
+        
+        if not vehiclePos then
+            if vehicle:IsA("BasePart") then
+                vehiclePos = vehicle.Position
+                vehicleVel = vehicle.AssemblyLinearVelocity
+            else
+                vehiclePos = targetHRP.Position
+            end
+        end
+        
+        hrp.CFrame = CFrame.new(vehiclePos + vehicleVel * 0.4)
+        return
+    end
+    
+    if hasReduceWalk(targetPlayer) then
+        local predictionValue = 0.155
+        local moveDir = targetHumanoid.MoveDirection
+        local walkSpeed = targetHumanoid.WalkSpeed
+        local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
+        
+        if targetHumanoid.FloorMaterial == Enum.Material.Air then
+            hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, -6.8, 0)) * CFrame.Angles(math.pi * 0.5, 0, 0)
+        else
+            hrp.CFrame = CFrame.new(targetPos)
+        end
+        return
+    end
+    
+    local predictedPos, moveDirection = getPredictedPosition(targetHRP, commandType or "knock")
+    if not predictedPos then
+        return
+    end
+    
+    if moveDirection and moveDirection.Magnitude > 0 then
+        hrp.CFrame = CFrame.new(predictedPos + (moveDirection * 6), predictedPos)
+    else
+        hrp.CFrame = CFrame.new(predictedPos)
+    end
+end
+
+local function startPredictorTracking(targetPlayer, commandType)
+    local active = true
+    
+    local function step()
+        pcall(function()
+            updateStandPosition(targetPlayer, commandType)
+        end)
+    end
+    
+    step()
+    
+    local connection = RunService.Heartbeat:Connect(function()
+        if not active then return end
+        step()
+    end)
+    
+    return function()
+        if not active then return end
+        active = false
+        if connection then
+            connection:Disconnect()
+        end
+    end
+end
+
 local function quickPunches(targetPlayer)
     if not targetPlayer then return false end
     
@@ -678,6 +778,8 @@ local function quickPunches(targetPlayer)
         API.currentFollowTarget = targetPlayer
     end
     
+    local stopTracking = startPredictorTracking(targetPlayer, "knock")
+    
     local maxPunches = 50
     local punches = 0
     
@@ -690,36 +792,6 @@ local function quickPunches(targetPlayer)
             
             local targetHRP = targetCharacter:FindFirstChild("HumanoidRootPart")
             if not targetHRP then return true end
-            
-            local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
-            if not targetHumanoid then return true end
-            
-            local hrp = getLocalHRP()
-            if not hrp then return true end
-            
-            local inVehicle, vehicle = isInVehicle(targetPlayer)
-            
-            if inVehicle and vehicle then
-                local vehicleVel = vehicle:GetPivot() and vehicle:GetVelocityAtPosition(vehicle:GetPivot().Position) or Vector3.zero
-                hrp.CFrame = CFrame.new(vehicle.Position + vehicleVel * 0.4)
-            elseif hasReduceWalk(targetPlayer) then
-                local predictionValue = 0.155
-                local moveDir = targetHumanoid.MoveDirection
-                local walkSpeed = targetHumanoid.WalkSpeed
-                
-                if targetHumanoid.FloorMaterial == Enum.Material.Air then
-                    local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
-                    hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, -6.8, 0)) * CFrame.Angles(math.pi * 0.5, 0, 0)
-                else
-                    local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
-                    hrp.CFrame = CFrame.new(targetPos)
-                end
-            else
-                local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
-                if predictedPos then
-                    hrp.CFrame = CFrame.new(predictedPos + (moveDirection * 6), predictedPos)
-                end
-            end
 
             combatTool:Activate()
             task.wait(0.06)
@@ -733,6 +805,11 @@ local function quickPunches(targetPlayer)
         end
         
         task.wait(0.1)
+    end
+    
+    if stopTracking then
+        stopTracking()
+        stopTracking = nil
     end
     
     unequipTools()
@@ -768,11 +845,17 @@ local function chargedPunch(targetPlayer)
     local wasFollowing = Stand.Following
     local wasManualControl = Stand.ManualControl
     local originalTarget = API.currentFollowTarget
+    local stopTracking = nil
+    
     local function restoreState()
         Stand.Attacking = wasAttacking
         Stand.Following = wasFollowing
         Stand.ManualControl = wasManualControl
         API.currentFollowTarget = originalTarget
+        if stopTracking then
+            stopTracking()
+            stopTracking = nil
+        end
     end
     
     -- Enable manual control to bypass MoveStand function
@@ -823,42 +906,9 @@ local function chargedPunch(targetPlayer)
     Stand.Following = false
     Stand.Attacking = false
     
-    pcall(function()
-        local targetCharacter = targetPlayer and targetPlayer.Character
-        if not targetCharacter then return end
-        
-        local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
-        if not targetHumanoid then return end
-        
-        local hrp = getLocalHRP()
-        if not hrp then return end
-        
-        local inVehicle, vehicle = isInVehicle(targetPlayer)
-        
-        if inVehicle and vehicle then
-            local vehicleVel = vehicle:GetPivot() and vehicle:GetVelocityAtPosition(vehicle:GetPivot().Position) or Vector3.zero
-            hrp.CFrame = CFrame.new(vehicle.Position + vehicleVel * 0.4)
-        elseif hasReduceWalk(targetPlayer) then
-            local predictionValue = 0.155
-            local moveDir = targetHumanoid.MoveDirection
-            local walkSpeed = targetHumanoid.WalkSpeed
-            
-            if targetHumanoid.FloorMaterial == Enum.Material.Air then
-                local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
-                hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, -6.8, 0)) * CFrame.Angles(math.pi * 0.5, 0, 0)
-            else
-                local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
-                hrp.CFrame = CFrame.new(targetPos)
-            end
-        else
-            local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
-            if predictedPos then
-                hrp.CFrame = CFrame.new(predictedPos + (moveDirection * 6), predictedPos)
-            end
-        end
-    end)
-    
     pcall(function() combatTool:Deactivate() end)
+    
+    stopTracking = startPredictorTracking(targetPlayer, "knock")
     
     local maxAttempts = 25
     local attempts = 0
@@ -873,36 +923,6 @@ local function chargedPunch(targetPlayer)
             
             local loopHRP = loopCharacter:FindFirstChild("HumanoidRootPart")
             if not loopHRP then return end
-            
-            local targetHumanoid = loopCharacter:FindFirstChildOfClass("Humanoid")
-            if not targetHumanoid then return end
-            
-            local hrp = getLocalHRP()
-            if not hrp then return end
-            
-            local inVehicle, vehicle = isInVehicle(targetPlayer)
-            
-            if inVehicle and vehicle then
-                local vehicleVel = vehicle:GetPivot() and vehicle:GetVelocityAtPosition(vehicle:GetPivot().Position) or Vector3.zero
-                hrp.CFrame = CFrame.new(vehicle.Position + vehicleVel * 0.4)
-            elseif hasReduceWalk(targetPlayer) then
-                local predictionValue = 0.155
-                local moveDir = targetHumanoid.MoveDirection
-                local walkSpeed = targetHumanoid.WalkSpeed
-                
-                if targetHumanoid.FloorMaterial == Enum.Material.Air then
-                    local targetPos = loopHRP.Position + moveDir * predictionValue * walkSpeed
-                    hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, -6.8, 0)) * CFrame.Angles(math.pi * 0.5, 0, 0)
-                else
-                    local targetPos = loopHRP.Position + moveDir * predictionValue * walkSpeed
-                    hrp.CFrame = CFrame.new(targetPos)
-                end
-            else
-                local newPredictedPos, newMoveDirection = getPredictedPosition(loopHRP, "knock")
-                if newPredictedPos then
-                    hrp.CFrame = CFrame.new(newPredictedPos + (newMoveDirection * 6), newPredictedPos)
-                end
-            end
             
             combatTool:Activate()
             task.wait(0.06)
@@ -922,7 +942,6 @@ local function chargedPunch(targetPlayer)
     end
     
     unequipTools()
-    
     restoreState()
     
     return knockSuccess
