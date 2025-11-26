@@ -325,6 +325,33 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
         return Vector3.new(0, predictedY - initialPos.Y, 0)
     end
 
+    local function remap(value, minValue, maxValue, newMin, newMax)
+        if maxValue == minValue then
+            return newMin
+        end
+
+        local alpha = math.clamp((value - minValue) / (maxValue - minValue), 0, 1)
+        return newMin + (newMax - newMin) * alpha
+    end
+
+    local function getWalkingDistanceBoost(speed)
+        if speed < 0.5 then
+            return 0
+        elseif speed < 6 then
+            return remap(speed, 0.5, 6, 0, 9)
+        elseif speed < 12 then
+            return remap(speed, 6, 12, 9, 14)
+        elseif speed < 18 then
+            return remap(speed, 12, 18, 14, 16)
+        elseif speed < 24 then
+            return remap(speed, 18, 24, 16, 12)
+        elseif speed < 30 then
+            return remap(speed, 24, 30, 12, 9)
+        else
+            return remap(math.clamp(speed, 30, 42), 30, 42, 9, 6)
+        end
+    end
+
     return function(targetHRP, commandType)
         local predictionType = commandType == "knock" and "punch" or commandType
         local predictedPos, moveDirection = originalPredict(targetHRP, predictionType)
@@ -415,26 +442,10 @@ wrapAPIMethod("getPredictedPosition", function(originalPredict)
             desiredDistance = desiredDistance * 0.9
         end
         
-        -- Adaptive distance boost based on movement state
-        local distanceBoost = 0
-        local isStanding = effectiveSpeed < 0.5
-        local isWalkingSlow = effectiveSpeed >= 0.5 and effectiveSpeed < 8
-        local isWalkingNormal = effectiveSpeed >= 8 and effectiveSpeed < 15
-        local isMovingFast = effectiveSpeed >= 15
-        
-        if not isStanding then
-            if isWalkingSlow then
-                -- Walking slowly: add significant boost (7-8 studs) to compensate for lag
-                distanceBoost = 7 + math.min(effectiveSpeed * 0.15, 1)
-            elseif isWalkingNormal then
-                -- Normal walking: add moderate boost (5-6 studs)
-                distanceBoost = 5 + math.min((effectiveSpeed - 8) * 0.2, 1.4)
-            elseif isMovingFast then
-                -- Fast movement: add smaller boost (3-4 studs) since distance bonuses above handle it
-                distanceBoost = 3 + math.min((effectiveSpeed - 15) * 0.05, 1)
-            end
-        end
-        -- If standing still (effectiveSpeed < 0.5), distanceBoost remains 0
+        -- Adaptive distance boost with smooth curve
+        -- Peaks at normal walking speed (~12-18 studs/sec) with 14-16 stud boost
+        -- This directly fixes the 7-10 stud desync issue at normal walking speeds
+        local distanceBoost = getWalkingDistanceBoost(effectiveSpeed)
         
         desiredDistance = desiredDistance + distanceBoost
 
@@ -541,6 +552,82 @@ local function isKnockedOut(player)
     return success2 and result or false
 end
 
+local function isDead(player)
+    if not player then
+        return false
+    end
+    
+    local success, character = pcall(function()
+        return player.Character
+    end)
+    if not success or not character then
+        return true
+    end
+    
+    local success2, result = pcall(function()
+        local bodyEffects = character:FindFirstChild("BodyEffects")
+        if bodyEffects then
+            local dead = bodyEffects:FindFirstChild("Dead")
+            if dead and dead.Value then
+                return true
+            end
+        end
+        return false
+    end)
+    
+    return success2 and result or false
+end
+
+local function hasReduceWalk(player)
+    if not player then
+        return false
+    end
+    
+    local success, result = pcall(function()
+        local character = player.Character
+        if not character then return false end
+        
+        local bodyEffects = character:FindFirstChild("BodyEffects")
+        if not bodyEffects then return false end
+        
+        local movement = bodyEffects:FindFirstChild("Movement")
+        if not movement then return false end
+        
+        return movement:FindFirstChild("ReduceWalk") ~= nil
+    end)
+    
+    return success and result or false
+end
+
+local function isInVehicle(player)
+    if not player then
+        return false, nil
+    end
+    
+    local success, vehicleContainer = pcall(function()
+        local vehicles = workspace:FindFirstChild("Vehicles")
+        if not vehicles then return nil end
+        return vehicles:FindFirstChild(player.Name)
+    end)
+    
+    if not success or not vehicleContainer then
+        return false, nil
+    end
+    
+    local vehiclePart
+    if vehicleContainer:IsA("Model") then
+        vehiclePart = vehicleContainer.PrimaryPart or vehicleContainer:FindFirstChildWhichIsA("BasePart")
+    elseif vehicleContainer:IsA("BasePart") then
+        vehiclePart = vehicleContainer
+    end
+    
+    if not vehiclePart then
+        return false, nil
+    end
+    
+    return true, vehiclePart
+end
+
 local function equipCombatTool()
     local success, result = pcall(function()
         local player = getLocalPlayer()
@@ -575,6 +662,8 @@ end
 local function quickPunches(targetPlayer)
     if not targetPlayer then return false end
     
+    if isDead(targetPlayer) then return false end
+    
     local combatTool = equipCombatTool()
     if not combatTool then
         return false
@@ -592,7 +681,7 @@ local function quickPunches(targetPlayer)
     local maxPunches = 50
     local punches = 0
     
-    while punches < maxPunches and Stand.Attacking and not isKnockedOut(targetPlayer) do
+    while punches < maxPunches and Stand.Attacking and not isKnockedOut(targetPlayer) and not isDead(targetPlayer) do
         punches = punches + 1
         
         local success, shouldBreak = pcall(function()
@@ -602,11 +691,34 @@ local function quickPunches(targetPlayer)
             local targetHRP = targetCharacter:FindFirstChild("HumanoidRootPart")
             if not targetHRP then return true end
             
-            local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
+            local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
+            if not targetHumanoid then return true end
             
             local hrp = getLocalHRP()
-            if predictedPos and hrp then
-                hrp.CFrame = CFrame.new(predictedPos + (moveDirection * 6), predictedPos)
+            if not hrp then return true end
+            
+            local inVehicle, vehicle = isInVehicle(targetPlayer)
+            
+            if inVehicle and vehicle then
+                local vehicleVel = vehicle:GetPivot() and vehicle:GetVelocityAtPosition(vehicle:GetPivot().Position) or Vector3.zero
+                hrp.CFrame = CFrame.new(vehicle.Position + vehicleVel * 0.4)
+            elseif hasReduceWalk(targetPlayer) then
+                local predictionValue = 0.155
+                local moveDir = targetHumanoid.MoveDirection
+                local walkSpeed = targetHumanoid.WalkSpeed
+                
+                if targetHumanoid.FloorMaterial == Enum.Material.Air then
+                    local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
+                    hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, -6.8, 0)) * CFrame.Angles(math.pi * 0.5, 0, 0)
+                else
+                    local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
+                    hrp.CFrame = CFrame.new(targetPos)
+                end
+            else
+                local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
+                if predictedPos then
+                    hrp.CFrame = CFrame.new(predictedPos + (moveDirection * 6), predictedPos)
+                end
             end
 
             combatTool:Activate()
@@ -639,6 +751,8 @@ local FALLBACK_POSITIONS = {
 local function chargedPunch(targetPlayer)
     if not targetPlayer then return false end
     
+    if isDead(targetPlayer) then return false end
+    
     local combatTool = equipCombatTool()
     if not combatTool then
         return false
@@ -668,7 +782,7 @@ local function chargedPunch(targetPlayer)
     API.currentFollowTarget = nil
     
     while tick() - startTime < chargeTime do
-        if isKnockedOut(targetPlayer) then
+        if isKnockedOut(targetPlayer) or isDead(targetPlayer) then
             pcall(function() combatTool:Deactivate() end)
             unequipTools()
             restoreState()
@@ -710,11 +824,37 @@ local function chargedPunch(targetPlayer)
     Stand.Attacking = false
     
     pcall(function()
-        local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
+        local targetCharacter = targetPlayer and targetPlayer.Character
+        if not targetCharacter then return end
+        
+        local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
+        if not targetHumanoid then return end
         
         local hrp = getLocalHRP()
-        if predictedPos and hrp then
-            hrp.CFrame = CFrame.new(predictedPos + (moveDirection * 6), predictedPos)
+        if not hrp then return end
+        
+        local inVehicle, vehicle = isInVehicle(targetPlayer)
+        
+        if inVehicle and vehicle then
+            local vehicleVel = vehicle:GetPivot() and vehicle:GetVelocityAtPosition(vehicle:GetPivot().Position) or Vector3.zero
+            hrp.CFrame = CFrame.new(vehicle.Position + vehicleVel * 0.4)
+        elseif hasReduceWalk(targetPlayer) then
+            local predictionValue = 0.155
+            local moveDir = targetHumanoid.MoveDirection
+            local walkSpeed = targetHumanoid.WalkSpeed
+            
+            if targetHumanoid.FloorMaterial == Enum.Material.Air then
+                local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
+                hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, -6.8, 0)) * CFrame.Angles(math.pi * 0.5, 0, 0)
+            else
+                local targetPos = targetHRP.Position + moveDir * predictionValue * walkSpeed
+                hrp.CFrame = CFrame.new(targetPos)
+            end
+        else
+            local predictedPos, moveDirection = getPredictedPosition(targetHRP, "knock")
+            if predictedPos then
+                hrp.CFrame = CFrame.new(predictedPos + (moveDirection * 6), predictedPos)
+            end
         end
     end)
     
@@ -724,7 +864,7 @@ local function chargedPunch(targetPlayer)
     local attempts = 0
     local knockSuccess = false
     
-    while not isKnockedOut(targetPlayer) and attempts < maxAttempts do
+    while not isKnockedOut(targetPlayer) and not isDead(targetPlayer) and attempts < maxAttempts do
         attempts = attempts + 1
         
         local loopSuccess = pcall(function()
@@ -734,10 +874,34 @@ local function chargedPunch(targetPlayer)
             local loopHRP = loopCharacter:FindFirstChild("HumanoidRootPart")
             if not loopHRP then return end
             
-            local newPredictedPos, newMoveDirection = getPredictedPosition(loopHRP, "knock")
+            local targetHumanoid = loopCharacter:FindFirstChildOfClass("Humanoid")
+            if not targetHumanoid then return end
+            
             local hrp = getLocalHRP()
-            if newPredictedPos and hrp then
-                hrp.CFrame = CFrame.new(newPredictedPos + (newMoveDirection * 6), newPredictedPos)
+            if not hrp then return end
+            
+            local inVehicle, vehicle = isInVehicle(targetPlayer)
+            
+            if inVehicle and vehicle then
+                local vehicleVel = vehicle:GetPivot() and vehicle:GetVelocityAtPosition(vehicle:GetPivot().Position) or Vector3.zero
+                hrp.CFrame = CFrame.new(vehicle.Position + vehicleVel * 0.4)
+            elseif hasReduceWalk(targetPlayer) then
+                local predictionValue = 0.155
+                local moveDir = targetHumanoid.MoveDirection
+                local walkSpeed = targetHumanoid.WalkSpeed
+                
+                if targetHumanoid.FloorMaterial == Enum.Material.Air then
+                    local targetPos = loopHRP.Position + moveDir * predictionValue * walkSpeed
+                    hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, -6.8, 0)) * CFrame.Angles(math.pi * 0.5, 0, 0)
+                else
+                    local targetPos = loopHRP.Position + moveDir * predictionValue * walkSpeed
+                    hrp.CFrame = CFrame.new(targetPos)
+                end
+            else
+                local newPredictedPos, newMoveDirection = getPredictedPosition(loopHRP, "knock")
+                if newPredictedPos then
+                    hrp.CFrame = CFrame.new(newPredictedPos + (newMoveDirection * 6), newPredictedPos)
+                end
             end
             
             combatTool:Activate()
@@ -784,7 +948,7 @@ API.Create("knock", function(args)
         return
     end
     
-    if isKnockedOut(target) then
+    if isKnockedOut(target) or isDead(target) then
         return
     end
     
@@ -804,9 +968,9 @@ API.Create("knock", function(args)
         -- Keep retrying with timeout to avoid prolonged lag
         local commandStartTime = tick()
         local maxCommandTime = 5
-        while not success and not isKnockedOut(target) and Stand.Attacking and (tick() - commandStartTime < maxCommandTime) do
+        while not success and not isKnockedOut(target) and not isDead(target) and Stand.Attacking and (tick() - commandStartTime < maxCommandTime) do
             success = chargedPunch(target)
-            if not success and not isKnockedOut(target) and Stand.Attacking then
+            if not success and not isKnockedOut(target) and not isDead(target) and Stand.Attacking then
                 -- Pause between attempts
                 for i = 1, 10 do
                     if not Stand.Attacking then break end
@@ -839,6 +1003,10 @@ API.Create("stomp", function(args)
         return
     end
     
+    if isDead(target) then
+        return
+    end
+    
     -- Save original state
     local wasAttacking = Stand.Attacking
     local wasFollowing = Stand.Following
@@ -857,14 +1025,14 @@ API.Create("stomp", function(args)
         local knockStartTime = tick()
         local maxKnockTime = 10
 
-        while not success and not isKnockedOut(target) and Stand.Attacking and (tick() - knockStartTime < maxKnockTime) do
+        while not success and not isKnockedOut(target) and not isDead(target) and Stand.Attacking and (tick() - knockStartTime < maxKnockTime) do
             success = chargedPunch(target)
-            if not success and not isKnockedOut(target) and Stand.Attacking then
+            if not success and not isKnockedOut(target) and not isDead(target) and Stand.Attacking then
                 task.wait(0.2)
             end
         end
 
-        if not isKnockedOut(target) then
+        if not isKnockedOut(target) or isDead(target) then
             -- Failed to knock out, restore state and exit
             Stand.Attacking = wasAttacking
             Stand.Following = wasFollowing
