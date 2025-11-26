@@ -616,13 +616,15 @@ local function isInVehicle(player)
     end
     
     local vehiclePart
-    if vehicleContainer:IsA("Model") then
-        vehiclePart = vehicleContainer.PrimaryPart or vehicleContainer:FindFirstChildWhichIsA("BasePart")
-    elseif vehicleContainer:IsA("BasePart") then
-        vehiclePart = vehicleContainer
-    end
+    local partSuccess = pcall(function()
+        if vehicleContainer:IsA("Model") then
+            vehiclePart = vehicleContainer.PrimaryPart or vehicleContainer:FindFirstChildWhichIsA("BasePart")
+        elseif vehicleContainer:IsA("BasePart") or vehicleContainer:IsA("MeshPart") then
+            vehiclePart = vehicleContainer
+        end
+    end)
     
-    if not vehiclePart then
+    if not partSuccess or not vehiclePart then
         return false, nil
     end
     
@@ -673,6 +675,7 @@ local function updateStandPosition(targetPlayer, commandType)
     local hrp = getLocalHRP()
     if not hrp then return end
     
+    -- Force zero velocity first
     hrp.AssemblyLinearVelocity = Vector3.zero
     hrp.AssemblyAngularVelocity = Vector3.zero
     
@@ -696,15 +699,17 @@ local function updateStandPosition(targetPlayer, commandType)
         end
         
         if not vehiclePos then
-            if vehicle:IsA("BasePart") then
+            if vehicle:IsA("BasePart") or vehicle:IsA("MeshPart") then
                 vehiclePos = vehicle.Position
-                vehicleVel = vehicle.AssemblyLinearVelocity
+                vehicleVel = vehicle.AssemblyLinearVelocity or Vector3.zero
             else
                 vehiclePos = targetHRP.Position
             end
         end
         
         hrp.CFrame = CFrame.new(vehiclePos + vehicleVel * 0.4)
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
         return
     end
     
@@ -719,6 +724,8 @@ local function updateStandPosition(targetPlayer, commandType)
         else
             hrp.CFrame = CFrame.new(targetPos)
         end
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
         return
     end
     
@@ -732,6 +739,10 @@ local function updateStandPosition(targetPlayer, commandType)
     else
         hrp.CFrame = CFrame.new(predictedPos)
     end
+    
+    -- Force zero velocity after setting CFrame to prevent drift
+    hrp.AssemblyLinearVelocity = Vector3.zero
+    hrp.AssemblyAngularVelocity = Vector3.zero
 end
 
 local function startPredictorTracking(targetPlayer, commandType)
