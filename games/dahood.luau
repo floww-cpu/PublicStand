@@ -1754,102 +1754,89 @@ API.Create("dcash", function(args)
     dropTenK()
 end)
 
+local MASK_TOOL_NAME = "[Mask]"
+local MASK_ITEM_NAME = "[Surgeon Mask] - $27"
+
+local function getMaskTool()
+    local character = getLocalCharacter()
+    if character then
+        local tool = character:FindFirstChild(MASK_TOOL_NAME)
+        if tool then
+            return tool
+        end
+    end
+
+    local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+    if backpack then
+        return backpack:FindFirstChild(MASK_TOOL_NAME)
+    end
+
+    return nil
+end
+
+local function ensureMaskToolAvailable()
+    local existing = getMaskTool()
+    if existing then
+        return existing
+    end
+
+    local success, message = buyShopItem(MASK_ITEM_NAME, MASK_TOOL_NAME, 15)
+    if not success then
+        return nil, message
+    end
+
+    return getMaskTool()
+end
+
+local function equipMaskTool(maskTool, character, humanoid)
+    if not maskTool or not character or not humanoid then
+        return false
+    end
+
+    humanoid:UnequipTools()
+    task.wait(0.05)
+
+    if maskTool.Parent ~= character then
+        maskTool.Parent = character
+        task.wait(0.1)
+    end
+
+    local equippedMask = character:FindFirstChild(MASK_TOOL_NAME) or maskTool
+    if equippedMask and equippedMask:IsA("Tool") then
+        pcall(function()
+            equippedMask:Activate()
+        end)
+        task.wait(0.1)
+        humanoid:UnequipTools()
+        return true
+    end
+
+    return false
+end
+
 -- Mask command - puts on mask
 API.Create("mask", function(args)
-    local hrp = getLocalHRP()
-    if not hrp then
-        API.sendChat("HRP missing!")
+    API.sendChat("Buying mask...")
+    
+    local maskTool, errorMsg = ensureMaskToolAvailable()
+    if not maskTool then
+        API.sendChat("Failed to buy mask" .. (errorMsg and ": " .. errorMsg or "!"))
         return
     end
     
     local character = getLocalCharacter()
-    if not character then
-        API.sendChat("Character missing!")
-        return
-    end
-    
     local humanoid = getLocalHumanoid()
-    if not humanoid then
-        API.sendChat("Humanoid missing!")
+    if not character or not humanoid then
+        API.sendChat("Character/Humanoid missing!")
         return
     end
     
-    API.sendChat("Buying mask...")
-    
-    local maskItemName = "[Surgeon Mask] - $27"
-    local maskToolName = "[Mask]"
-    
-    local shopFolder = getShopFolder()
-    if not shopFolder then
-        API.sendChat("Shop folder missing!")
-        return
-    end
-    
-    local shopItem = shopFolder:FindFirstChild(maskItemName)
-    if not shopItem then
-        API.sendChat("Mask shop item not found!")
-        return
-    end
-    
-    local head = shopItem:FindFirstChild("Head")
-    local detector = shopItem:FindFirstChild("ClickDetector")
-    if not head or not detector then
-        API.sendChat("Mask shop item incomplete!")
-        return
-    end
-    
-    humanoid:UnequipTools()
-    task.wait(0.1)
-    
-    local originalCFrame = hrp.CFrame
-    pcall(function()
-        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
-    end)
-    
-    task.wait(0.15)
-    
-    local clickFunction = getClickDetectorFunc()
-    if not clickFunction then
-        pcall(function()
-            hrp.CFrame = originalCFrame
-        end)
-        API.sendChat("fireclickdetector unavailable!")
-        return
-    end
-    
-    local success = false
-    for _ = 1, 5 do
-        pcall(function()
-            clickFunction(detector)
-        end)
-        task.wait(0.2)
-        if LocalPlayer.Backpack:FindFirstChild(maskToolName) then
-            success = true
-            break
-        end
-    end
-    
-    if success then
-        task.wait(0.1)
-        local maskTool = LocalPlayer.Backpack:FindFirstChild(maskToolName)
-        if maskTool then
-            maskTool.Parent = character
-            task.wait(0.1)
-            local equippedMask = character:FindFirstChild(maskToolName)
-            if equippedMask then
-                equippedMask:Activate()
-                task.wait(0.1)
-                humanoid:UnequipTools()
-                API.sendChat("Mask equipped!")
-            end
-        end
+    local equipped = equipMaskTool(maskTool, character, humanoid)
+    if equipped then
+        API.sendChat("Mask equipped!")
     else
-        API.sendChat("Failed to buy mask!")
+        API.sendChat("Failed to equip mask!")
     end
-    
-    pcall(function()
-        hrp.CFrame = originalCFrame
-    end)
 end)
 
 -- AMask command - automatically puts on mask when no mask is equipped
@@ -1895,80 +1882,18 @@ API.Create("amask", function(args)
                 return
             end
             
-            local hrp = getLocalHRP()
-            if not hrp then
-                amaskBuying = false
-                return
-            end
-            
-            local maskToolName = "[Mask]"
-            local maskItemName = "[Surgeon Mask] - $27"
-            
-            local shopFolder = getShopFolder()
-            if not shopFolder then
-                amaskBuying = false
-                return
-            end
-            
-            local shopItem = shopFolder:FindFirstChild(maskItemName)
-            if not shopItem then
-                amaskBuying = false
-                return
-            end
-            
-            local head = shopItem:FindFirstChild("Head")
-            local detector = shopItem:FindFirstChild("ClickDetector")
-            if not head or not detector then
-                amaskBuying = false
-                return
-            end
-            
-            local originalCFrame = hrp.CFrame
-            humanoid:UnequipTools()
-            task.wait(0.1)
-            
-            pcall(function()
-                hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
-            end)
-            
-            task.wait(0.15)
-            
-            local clickFunction = getClickDetectorFunc()
-            if not clickFunction then
-                pcall(function()
-                    hrp.CFrame = originalCFrame
-                end)
-                amaskBuying = false
-                return
-            end
-            
-            for _ = 1, 5 do
-                pcall(function()
-                    clickFunction(detector)
-                end)
-                task.wait(0.2)
-                if LocalPlayer.Backpack:FindFirstChild(maskToolName) then
-                    break
+            local maskTool, errorMsg = ensureMaskToolAvailable()
+            if not maskTool then
+                if errorMsg then
+                    warn("[AMask] Failed to buy mask: " .. tostring(errorMsg))
                 end
+                amaskBuying = false
+                return
             end
             
-            task.wait(0.1)
-            local maskTool = LocalPlayer.Backpack:FindFirstChild(maskToolName)
-            if maskTool then
-                maskTool.Parent = character
-                task.wait(0.1)
-                local equippedMask = character:FindFirstChild(maskToolName)
-                if equippedMask then
-                    equippedMask:Activate()
-                    task.wait(0.1)
-                    humanoid:UnequipTools()
-                    print("[AMask] Auto-equipped mask")
-                end
+            if equipMaskTool(maskTool, character, humanoid) then
+                print("[AMask] Auto-equipped mask")
             end
-            
-            pcall(function()
-                hrp.CFrame = originalCFrame
-            end)
             
             amaskBuying = false
         end)
