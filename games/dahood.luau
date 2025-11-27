@@ -252,8 +252,8 @@ local function Hit()
 end
 
 local GUN_NAME = "[LMG]"
-local LMG_SHOP_ITEM = "[LMG] - $3978"
-local LMG_AMMO_ITEM = "200 [LMG Ammo] - $318"
+local LMG_SHOP_ITEM = "[LMG] - $4098"
+local LMG_AMMO_ITEM = "200 [LMG Ammo] - $328"
 local ShopFolder
 
 local function getShopFolder()
