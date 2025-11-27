@@ -112,6 +112,80 @@ end
 
 print("[Da Hood Config] Anticheat protection: Disabled commands that use BodyVelocity/BodyGyro")
 
+-- Track who kills/stomps the owner for revenge
+local function markKillerFromBodyEffects(bodyEffects, reason)
+    if not bodyEffects then return end
+    local creatorValue = bodyEffects:FindFirstChild("Creator")
+    if creatorValue and creatorValue.Value and creatorValue.Value:IsA("Player") then
+        lastKiller = creatorValue.Value
+        print(string.format("[Revenge Tracker] Marked %s via %s", lastKiller.Name, reason or "Creator"))
+        return
+    end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local theirAttacking = Attacking(player)
+            if theirAttacking and theirAttacking.Value == true then
+                lastKiller = player
+                print(string.format("[Revenge Tracker] Marked %s via %s fallback", player.Name, reason or "attack"))
+                break
+            end
+        end
+    end
+end
+
+local function attachRevengeTracker(character)
+    if not character then return end
+    task.spawn(function()
+        local bodyEffects = character:WaitForChild("BodyEffects", 10)
+        if not bodyEffects then return end
+        
+        local function onCreator(valueObj)
+            if not valueObj then return end
+            valueObj:GetPropertyChangedSignal("Value"):Connect(function()
+                if valueObj.Value and valueObj.Value:IsA("Player") then
+                    lastKiller = valueObj.Value
+                    print("[Revenge Tracker] Creator set to " .. lastKiller.Name)
+                end
+            end)
+        end
+        
+        local function onBoolean(valueObj, label)
+            if not valueObj then return end
+            valueObj:GetPropertyChangedSignal("Value"):Connect(function()
+                if valueObj.Value == true then
+                    markKillerFromBodyEffects(bodyEffects, label)
+                end
+            end)
+        end
+        
+        local function connectWhenAvailable(name, callback)
+            local existing = bodyEffects:FindFirstChild(name)
+            if existing then
+                callback(existing)
+            end
+            bodyEffects.ChildAdded:Connect(function(child)
+                if child.Name == name then
+                    callback(child)
+                end
+            end)
+        end
+        
+        connectWhenAvailable("Creator", onCreator)
+        connectWhenAvailable("K.O", function(value)
+            onBoolean(value, "K.O")
+        end)
+        connectWhenAvailable("Dead", function(value)
+            onBoolean(value, "Dead")
+        end)
+    end)
+end
+
+if LocalPlayer.Character then
+    attachRevengeTracker(LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(attachRevengeTracker)
+
 -- Helper functions
 local function getLocalPlayer()
     return Players.LocalPlayer
@@ -394,6 +468,19 @@ end
 local MainEvent = ReplicatedStorage:WaitForChild("MainEvent", 5)
 
 local ZERO_VECTOR = Vector3.new(0, 0, 0)
+
+-- Revenge tracking
+local lastKiller = nil
+
+-- Holster/unequip all tools
+local function unequipAllTools()
+    pcall(function()
+        local humanoid = getLocalHumanoid()
+        if humanoid then
+            humanoid:UnequipTools()
+        end
+    end)
+end
 
 local function shootTargetWithGun(target, gun)
     if not target or not gun or not MainEvent then
@@ -971,6 +1058,9 @@ API.Create("gknock", function(args)
             API.sendChat(target.Name .. " has been gun knocked out!")
         end
         
+        -- Unequip gun after command
+        unequipAllTools()
+        
         if API.Summon then
             task.wait(0.5)
             API.Summon()
@@ -1069,11 +1159,507 @@ API.Create("gstomp", function(args)
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
         
+        -- Unequip gun after command
+        unequipAllTools()
+        
         if API.Summon then
             task.wait(0.5)
             API.Summon()
         end
     end)
+end)
+
+-- Bring command (grab and bring knocked target to owner)
+API.Create("bring", function(args)
+    local target, playerName = resolveTargetFromArgs(args)
+    if not target or not target.Character then
+        API.sendChat("Target not found!")
+        return
+    end
+    if isDead(target) then
+        API.sendChat("Target is already dead!")
+        return
+    end
+    local targetKO = KO(target)
+    if not targetKO then
+        API.sendChat("Target invalid!")
+        return
+    end
+    
+    local originalFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    
+    API.sendChat("Bringing " .. target.Name .. "...")
+    
+    task.spawn(function()
+        -- First knock them out if not already KO'd
+        if targetKO.Value == false then
+            if not LocalPlayer.Character:FindFirstChild("Combat") then
+                if LocalPlayer.Backpack:FindFirstChild("Combat") then
+                    LocalPlayer.Backpack:FindFirstChild("Combat").Parent = LocalPlayer.Character
+                end
+            end
+            
+            local knockStartTime = tick()
+            local timeout = 30
+            
+            repeat
+                RunService.Stepped:Wait()
+                
+                if not target.Character or isDead(target) then
+                    break
+                end
+                
+                if targetKO.Value == false then
+                    Equip("Combat")
+                    if MainEvent then
+                        MainEvent:FireServer("ChargeButton")
+                    end
+                    TargetMelee(target)
+                else
+                    break
+                end
+                
+                if tick() - knockStartTime > timeout then
+                    API.sendChat("Knock timeout!")
+                    break
+                end
+                
+            until targetKO.Value == true or not target.Character or isDead(target)
+            
+            local attackingValue = Attacking(LocalPlayer)
+            if attackingValue then
+                local waitStart = tick()
+                while attackingValue.Value == true and tick() - waitStart < 5 do
+                    task.wait(0.1)
+                end
+            end
+        end
+        
+        -- Now grab and bring them
+        if targetKO.Value == true and not isDead(target) and API.ownerPlayer and API.ownerPlayer.Character then
+            local targetTorso = getTorso(target)
+            local myHRP = getLocalHRP()
+            local ownerRoot = getRoot(API.ownerPlayer)
+            
+            if targetTorso and myHRP and ownerRoot then
+                local bringAttempts = 0
+                repeat
+                    bringAttempts = bringAttempts + 1
+                    
+                    if not target.Character then
+                        break
+                    end
+                    
+                    local updatedTorso = getTorso(target)
+                    if updatedTorso then
+                        targetTorso = updatedTorso
+                    end
+                    
+                    if targetTorso then
+                        pcall(function()
+                            myHRP.CFrame = CFrame.new(targetTorso.Position) * CFrame.new(0, 3, 0)
+                        end)
+                    end
+                    
+                    task.wait(0.2)
+                    
+                    if MainEvent then
+                        MainEvent:FireServer("Grabbing")
+                    end
+                    
+                    task.wait(0.3)
+                    
+                    pcall(function()
+                        local updatedOwnerRoot = getRoot(API.ownerPlayer)
+                        if updatedOwnerRoot then
+                            ownerRoot = updatedOwnerRoot
+                        end
+                        if ownerRoot then
+                            myHRP.CFrame = ownerRoot.CFrame * CFrame.new(0, 2, 3)
+                        end
+                    end)
+                    
+                    task.wait(0.2)
+                    
+                until (not target.Character) or target.Character:FindFirstChild("GRABBING_CONSTRAINT") or targetKO.Value == false or bringAttempts >= 5
+                
+                local finalTorso = getTorso(target) or targetTorso
+                local finalOwnerRoot = getRoot(API.ownerPlayer) or ownerRoot
+                if target.Character and finalTorso and finalOwnerRoot and (target.Character:FindFirstChild("GRABBING_CONSTRAINT") or (finalTorso.Position - finalOwnerRoot.Position).Magnitude < 15) then
+                    API.sendChat(target.Name .. " has been brought!")
+                else
+                    API.sendChat("Failed to grab " .. target.Name)
+                end
+            end
+        end
+        
+        local localHumanoid = getLocalHumanoid()
+        if localHumanoid then
+            Workspace.Camera.CameraSubject = localHumanoid
+        end
+        
+        Stand.Following = originalFollowing
+        API.currentFollowTarget = originalTarget
+        
+        if API.Summon then
+            task.wait(0.5)
+            API.Summon()
+        end
+    end)
+end)
+
+-- GBring command (gun bring)
+API.Create("gbring", function(args)
+    local target, playerName = resolveTargetFromArgs(args)
+    if not target or not target.Character then
+        API.sendChat("Target not found!")
+        return
+    end
+    if isDead(target) then
+        API.sendChat("Target is already dead!")
+        return
+    end
+    local targetKO = KO(target)
+    if not targetKO then
+        API.sendChat("Target invalid!")
+        return
+    end
+    local tool = ensureToolEquipped(GUN_NAME)
+    if not tool then
+        API.sendChat("No LMG found! Use 'gun' command first.")
+        return
+    end
+    
+    local originalFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    
+    API.sendChat("Gun bringing " .. target.Name .. "...")
+    
+    task.spawn(function()
+        local stopStrafe = nil
+        
+        -- Knock with gun if not already KO'd
+        if targetKO.Value == false then
+            stopStrafe = startGunStrafe(target, {mode = "Sky", height = 8, radius = 10})
+            
+            local startTime = tick()
+            local timeout = 30
+            
+            while target.Character and not isDead(target) and targetKO.Value == false do
+                if tick() - startTime > timeout then
+                    API.sendChat("Gun knock timeout!")
+                    if stopStrafe then stopStrafe() end
+                    Stand.Following = originalFollowing
+                    API.currentFollowTarget = originalTarget
+                    unequipAllTools()
+                    return
+                end
+                
+                local gun = ensureToolEquipped(GUN_NAME)
+                if not gun then
+                    API.sendChat("Lost weapon!")
+                    if stopStrafe then stopStrafe() end
+                    Stand.Following = originalFollowing
+                    API.currentFollowTarget = originalTarget
+                    return
+                end
+                
+                local shotSuccess = shootTargetWithGun(target, gun)
+                if not shotSuccess then
+                    API.sendChat("Failed to shoot!")
+                    if stopStrafe then stopStrafe() end
+                    Stand.Following = originalFollowing
+                    API.currentFollowTarget = originalTarget
+                    unequipAllTools()
+                    return
+                end
+                
+                reloadGunIfNeeded(gun)
+                RunService.Heartbeat:Wait()
+            end
+            
+            if stopStrafe then
+                stopStrafe()
+                stopStrafe = nil
+            end
+        end
+        
+        -- Now grab and bring them
+        if targetKO.Value == true and not isDead(target) and API.ownerPlayer and API.ownerPlayer.Character then
+            local targetTorso = getTorso(target)
+            local myHRP = getLocalHRP()
+            local ownerRoot = getRoot(API.ownerPlayer)
+            
+            if targetTorso and myHRP and ownerRoot then
+                local bringAttempts = 0
+                repeat
+                    bringAttempts = bringAttempts + 1
+                    
+                    if not target.Character then
+                        break
+                    end
+                    
+                    local updatedTorso = getTorso(target)
+                    if updatedTorso then
+                        targetTorso = updatedTorso
+                    end
+                    
+                    if targetTorso then
+                        pcall(function()
+                            myHRP.CFrame = CFrame.new(targetTorso.Position) * CFrame.new(0, 3, 0)
+                        end)
+                    end
+                    
+                    task.wait(0.2)
+                    
+                    if MainEvent then
+                        MainEvent:FireServer("Grabbing")
+                    end
+                    
+                    task.wait(0.3)
+                    
+                    pcall(function()
+                        local updatedOwnerRoot = getRoot(API.ownerPlayer)
+                        if updatedOwnerRoot then
+                            ownerRoot = updatedOwnerRoot
+                        end
+                        if ownerRoot then
+                            myHRP.CFrame = ownerRoot.CFrame * CFrame.new(0, 2, 3)
+                        end
+                    end)
+                    
+                    task.wait(0.2)
+                    
+                until (not target.Character) or target.Character:FindFirstChild("GRABBING_CONSTRAINT") or targetKO.Value == false or bringAttempts >= 5
+                
+                local finalTorso = getTorso(target) or targetTorso
+                local finalOwnerRoot = getRoot(API.ownerPlayer) or ownerRoot
+                if target.Character and finalTorso and finalOwnerRoot and (target.Character:FindFirstChild("GRABBING_CONSTRAINT") or (finalTorso.Position - finalOwnerRoot.Position).Magnitude < 15) then
+                    API.sendChat(target.Name .. " has been gun brought!")
+                else
+                    API.sendChat("Failed to grab " .. target.Name)
+                end
+            end
+        end
+        
+        local localHumanoid = getLocalHumanoid()
+        if localHumanoid then
+            Workspace.Camera.CameraSubject = localHumanoid
+        end
+        
+        Stand.Following = originalFollowing
+        API.currentFollowTarget = originalTarget
+        
+        -- Unequip gun after command
+        unequipAllTools()
+        
+        if API.Summon then
+            task.wait(0.5)
+            API.Summon()
+        end
+    end)
+end)
+
+-- Revenge command (stomp the player who killed/stomped the owner)
+API.Create("revenge", function(args)
+    if not lastKiller or not lastKiller.Character then
+        API.sendChat("No one to get revenge on! (No recent killer tracked)")
+        return
+    end
+    
+    if isDead(lastKiller) then
+        API.sendChat(lastKiller.Name .. " is already dead!")
+        lastKiller = nil
+        return
+    end
+    
+    local targetKO = KO(lastKiller)
+    if not targetKO then
+        API.sendChat("Target invalid!")
+        return
+    end
+    
+    -- Check if we have a gun
+    local hasGun = hasTool(GUN_NAME)
+    
+    if hasGun then
+        API.sendChat("Getting revenge on " .. lastKiller.Name .. " with gun...")
+        
+        local tool = ensureToolEquipped(GUN_NAME)
+        if not tool then
+            API.sendChat("Failed to equip gun!")
+            return
+        end
+        
+        local originalFollowing = Stand.Following
+        local originalTarget = API.currentFollowTarget
+        Stand.Attacking = false
+        Stand.Following = false
+        API.currentFollowTarget = nil
+        
+        task.spawn(function()
+            local stopStrafe = nil
+            
+            if targetKO.Value == false then
+                stopStrafe = startGunStrafe(lastKiller, {mode = "Sky", height = 8, radius = 10})
+                
+                local startTime = tick()
+                local timeout = 30
+                
+                while lastKiller.Character and not isDead(lastKiller) and targetKO.Value == false do
+                    if tick() - startTime > timeout then
+                        API.sendChat("Gun knock timeout!")
+                        if stopStrafe then stopStrafe() end
+                        Stand.Following = originalFollowing
+                        API.currentFollowTarget = originalTarget
+                        unequipAllTools()
+                        return
+                    end
+                    
+                    local gun = ensureToolEquipped(GUN_NAME)
+                    if not gun then
+                        API.sendChat("Lost weapon!")
+                        if stopStrafe then stopStrafe() end
+                        Stand.Following = originalFollowing
+                        API.currentFollowTarget = originalTarget
+                        return
+                    end
+                    
+                    local shotSuccess = shootTargetWithGun(lastKiller, gun)
+                    if not shotSuccess then
+                        API.sendChat("Failed to shoot!")
+                        if stopStrafe then stopStrafe() end
+                        Stand.Following = originalFollowing
+                        API.currentFollowTarget = originalTarget
+                        unequipAllTools()
+                        return
+                    end
+                    
+                    reloadGunIfNeeded(gun)
+                    RunService.Heartbeat:Wait()
+                end
+                
+                if stopStrafe then
+                    stopStrafe()
+                    stopStrafe = nil
+                end
+            end
+            
+            if targetKO.Value == true and not isDead(lastKiller) then
+                stompTarget(lastKiller)
+                task.wait(0.5)
+                if isDead(lastKiller) then
+                    API.sendChat("Revenge complete! " .. lastKiller.Name .. " has been eliminated!")
+                else
+                    API.sendChat("Stomped " .. lastKiller.Name)
+                end
+            end
+            
+            local localHumanoid = getLocalHumanoid()
+            if localHumanoid then
+                Workspace.Camera.CameraSubject = localHumanoid
+            end
+            
+            Stand.Following = originalFollowing
+            API.currentFollowTarget = originalTarget
+            
+            -- Unequip gun after command
+            unequipAllTools()
+            
+            lastKiller = nil
+            
+            if API.Summon then
+                task.wait(0.5)
+                API.Summon()
+            end
+        end)
+    else
+        -- Use combat tool
+        API.sendChat("Getting revenge on " .. lastKiller.Name .. " with combat...")
+        
+        local originalFollowing = Stand.Following
+        local originalTarget = API.currentFollowTarget
+        Stand.Attacking = false
+        Stand.Following = false
+        API.currentFollowTarget = nil
+        
+        task.spawn(function()
+            if targetKO.Value == false then
+                if not LocalPlayer.Character:FindFirstChild("Combat") then
+                    if LocalPlayer.Backpack:FindFirstChild("Combat") then
+                        LocalPlayer.Backpack:FindFirstChild("Combat").Parent = LocalPlayer.Character
+                    end
+                end
+                
+                local knockStartTime = tick()
+                local timeout = 30
+                
+                repeat
+                    RunService.Stepped:Wait()
+                    
+                    if not lastKiller.Character or isDead(lastKiller) then
+                        break
+                    end
+                    
+                    if targetKO.Value == false then
+                        Equip("Combat")
+                        if MainEvent then
+                            MainEvent:FireServer("ChargeButton")
+                        end
+                        TargetMelee(lastKiller)
+                    else
+                        break
+                    end
+                    
+                    if tick() - knockStartTime > timeout then
+                        API.sendChat("Knock timeout!")
+                        break
+                    end
+                    
+                until targetKO.Value == true or not lastKiller.Character or isDead(lastKiller)
+                
+                local attackingValue = Attacking(LocalPlayer)
+                if attackingValue then
+                    local waitStart = tick()
+                    while attackingValue.Value == true and tick() - waitStart < 5 do
+                        task.wait(0.1)
+                    end
+                end
+            end
+            
+            if targetKO.Value == true and not isDead(lastKiller) then
+                stompTarget(lastKiller)
+                task.wait(0.5)
+                if isDead(lastKiller) then
+                    API.sendChat("Revenge complete! " .. lastKiller.Name .. " has been eliminated!")
+                else
+                    API.sendChat("Stomped " .. lastKiller.Name)
+                end
+            end
+            
+            local localHumanoid = getLocalHumanoid()
+            if localHumanoid then
+                Workspace.Camera.CameraSubject = localHumanoid
+            end
+            
+            Stand.Following = originalFollowing
+            API.currentFollowTarget = originalTarget
+            
+            lastKiller = nil
+            
+            if API.Summon then
+                task.wait(0.5)
+                API.Summon()
+            end
+        end)
+    end
 end)
 
 -- Chair destroyer (from memory - prevents stand from sitting)
@@ -1120,5 +1706,6 @@ task.spawn(function()
 end)
 
 print("[Da Hood Config] Loaded successfully!")
-print("[Da Hood Config] Commands: knock <player>, stomp <player>, gun, gknock <player>, gstomp <player>")
+print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge")
 print("[Da Hood Config] Prediction: 0.155 (AutoPredic from stando script)")
+print("[Da Hood Config] Revenge tracking active - will remember who kills/stomps the owner")
