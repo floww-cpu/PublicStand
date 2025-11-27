@@ -1,3 +1,18 @@
+-- Config
+local globalEnv = getgenv()
+globalEnv.SocietyStand = globalEnv.SocietyStand or {}
+
+local SocietyStandConfig = globalEnv.SocietyStand
+SocietyStandConfig.Dahood = SocietyStandConfig.Dahood or {}
+SocietyStandConfig.Dahood.Main = SocietyStandConfig.Dahood.Main or {}
+
+if SocietyStandConfig.Dahood.Main.Automask == nil then
+    SocietyStandConfig.Dahood.Main.Automask = true
+end
+
+local DahoodConfig = SocietyStandConfig.Dahood
+local DahoodMainConfig = DahoodConfig.Main
+
 local requiredFields = {"Stand", "Create", "Stop", "sendChat", "getPlayer", "ownerPlayer", "Notify"}
 local function isAPIReady()
     local api = getgenv().SocietyStandAPI
@@ -396,6 +411,20 @@ local function hasTool(toolName)
     return false
 end
 
+local function hasAnyTool(toolNames)
+    if type(toolNames) == "table" then
+        for _, name in ipairs(toolNames) do
+            if hasTool(name) then
+                return true
+            end
+        end
+        return false
+    elseif type(toolNames) == "string" then
+        return hasTool(toolNames)
+    end
+    return false
+end
+
 local function getTool(toolName)
     local character = getLocalCharacter()
     if character and character:FindFirstChild(toolName) then
@@ -478,7 +507,7 @@ local function buyShopItem(shopItemName, expectedToolName, attempts)
             clickFunction(detector)
         end)
         task.wait(0.2)
-        if not expectedToolName or hasTool(expectedToolName) then
+        if not expectedToolName or hasAnyTool(expectedToolName) then
             success = true
             break
         end
@@ -1780,12 +1809,75 @@ local function ensureMaskToolAvailable()
         return existing
     end
 
-    local success, message = buyShopItem(MASK_ITEM_NAME, MASK_TOOL_NAME, 15)
-    if not success then
-        return nil, message
+    -- Use a more persistent buying approach like the otherstands version
+    local shopFolder = getShopFolder()
+    if not shopFolder then
+        return nil, "Shop folder missing"
     end
-
-    return getMaskTool()
+    
+    local shopItem = shopFolder:FindFirstChild(MASK_ITEM_NAME)
+    if not shopItem then
+        return nil, "Shop item not found"
+    end
+    
+    local head = shopItem:FindFirstChild("Head")
+    local detector = shopItem:FindFirstChild("ClickDetector")
+    if not head or not detector then
+        return nil, "Shop item incomplete"
+    end
+    
+    local hrp = getLocalHRP()
+    if not hrp then
+        return nil, "HumanoidRootPart missing"
+    end
+    
+    local originalCFrame
+    pcall(function()
+        originalCFrame = hrp.CFrame
+        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
+    end)
+    
+    task.wait(0.15)
+    
+    local clickFunction = getClickDetectorFunc()
+    if not clickFunction then
+        pcall(function()
+            if originalCFrame then
+                hrp.CFrame = originalCFrame
+            end
+        end)
+        return nil, "fireclickdetector unavailable"
+    end
+    
+    -- Keep trying until we get the tool (similar to otherstands version)
+    local startTime = tick()
+    local timeout = 10 -- 10 second timeout
+    
+    while not getMaskTool() and (tick() - startTime) < timeout do
+        pcall(function()
+            clickFunction(detector)
+        end)
+        task.wait(0.25)
+        
+        -- Check if tool appeared
+        local tool = getMaskTool()
+        if tool then
+            break
+        end
+    end
+    
+    pcall(function()
+        if originalCFrame then
+            hrp.CFrame = originalCFrame
+        end
+    end)
+    
+    local finalTool = getMaskTool()
+    if finalTool then
+        return finalTool
+    else
+        return nil, "Purchase timeout - mask not received"
+    end
 end
 
 local function equipMaskTool(maskTool, character, humanoid)
@@ -1972,7 +2064,78 @@ task.spawn(function()
     end)
 end)
 
+-- Auto-activate AMask if configured
+if DahoodMainConfig.Automask == true and not amaskActive then
+    task.spawn(function()
+        task.wait(2) -- Wait a bit for everything to load
+        amaskActive = true
+        print("[Da Hood Config] Auto-activating AMask (getgenv config: Automask = true)")
+        
+        local function checkAndEquipMask()
+            if not amaskActive or amaskBuying then return end
+            amaskBuying = true
+            
+            task.spawn(function()
+                local character = getLocalCharacter()
+                if not character then
+                    amaskBuying = false
+                    return
+                end
+                
+                local bodyEffects = character:FindFirstChild("BodyEffects")
+                if not bodyEffects then
+                    amaskBuying = false
+                    return
+                end
+                
+                local mask = bodyEffects:FindFirstChild("Mask")
+                if mask and mask.Value ~= nil then
+                    amaskBuying = false
+                    return
+                end
+                
+                local humanoid = getLocalHumanoid()
+                if not humanoid then
+                    amaskBuying = false
+                    return
+                end
+                
+                local maskTool, errorMsg = ensureMaskToolAvailable()
+                if not maskTool then
+                    if errorMsg then
+                        warn("[AMask] Failed to buy mask: " .. tostring(errorMsg))
+                    end
+                    amaskBuying = false
+                    return
+                end
+                
+                if equipMaskTool(maskTool, character, humanoid) then
+                    print("[AMask] Auto-equipped mask")
+                end
+                
+                amaskBuying = false
+            end)
+        end
+        
+        amaskConnection = RunService.Heartbeat:Connect(function()
+            if not amaskActive or amaskBuying then return end
+            
+            local character = getLocalCharacter()
+            if not character then return end
+            
+            local bodyEffects = character:FindFirstChild("BodyEffects")
+            if not bodyEffects then return end
+            
+            local mask = bodyEffects:FindFirstChild("Mask")
+            if not mask or mask.Value == nil then
+                pcall(checkAndEquipMask)
+            end
+        end)
+    end)
+end
+
 print("[Da Hood Config] Loaded successfully!")
 print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge, drop, wallet, dropcash/dcash, mask, amask, unamask")
 print("[Da Hood Config] Prediction: 0.155 (AutoPredic from stando script)")
 print("[Da Hood Config] Revenge tracking active - will remember who kills/stomps the owner")
+print("[Da Hood Config] Config: getgenv().SocietyStand.Dahood.Main.Automask = " .. tostring(DahoodMainConfig.Automask))
