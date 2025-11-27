@@ -376,15 +376,18 @@ local function buyShopItem(shopItemName, expectedToolName, attempts)
 end
 
 local function buyLMG(ammoPurchases)
-    local success, message = buyShopItem(LMG_SHOP_ITEM, GUN_NAME, 8)
-    if not success then
-        return false, message
+    local hasGun = hasTool(GUN_NAME)
+    if not hasGun then
+        local success, message = buyShopItem(LMG_SHOP_ITEM, GUN_NAME, 8)
+        if not success then
+            return false, message
+        end
     end
     local purchases = ammoPurchases or 6
     for _ = 1, purchases do
         buyShopItem(LMG_AMMO_ITEM, nil, 1)
     end
-    return true
+    return true, hasGun and "ammo_only" or "full_purchase"
 end
 
 -- MainEvent reference
@@ -475,6 +478,78 @@ end
 
 -- AutoPredic value (prediction multiplier)
 local AutoPredic = 0.155
+
+-- Strafe defaults for gun commands
+local STRAFE_DEFAULTS = {
+    height = 8,
+    radius = 10,
+    rotationSpeed = (2 * math.pi) / 0.7,
+    mode = "Sky"
+}
+
+local function startGunStrafe(target, config)
+    config = config or {}
+    local mode = config.mode or STRAFE_DEFAULTS.mode
+    local height = config.height or STRAFE_DEFAULTS.height
+    local radius = math.max(config.radius or STRAFE_DEFAULTS.radius, 4)
+    local rotationSpeed = config.rotationSpeed or STRAFE_DEFAULTS.rotationSpeed
+    local angle = 0
+    local connection
+
+    connection = RunService.Heartbeat:Connect(function(dt)
+        local myHRP = getLocalHRP()
+        local targetRoot = getRoot(target)
+        local targetHumanoid = getHumanoid(target)
+
+        if not myHRP or not targetRoot or not targetHumanoid or not target or not target.Character then
+            return
+        end
+
+        angle = (angle + rotationSpeed * dt) % (math.pi * 2)
+
+        local predictedPosition = targetRoot.Position
+        local success, prediction = pcall(function()
+            return targetHumanoid.MoveDirection * AutoPredic * targetHumanoid.WalkSpeed
+        end)
+        if success and prediction then
+            predictedPosition += prediction
+        end
+
+        local offsetY
+        if mode == "Under" then
+            if targetHumanoid.FloorMaterial == Enum.Material.Air then
+                offsetY = -height - 8
+            else
+                offsetY = -height - 2
+            end
+        else
+            offsetY = height
+        end
+
+        local orbitCenter = predictedPosition + Vector3.new(0, offsetY, 0)
+        local orbitCFrame = CFrame.new(orbitCenter) * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, radius)
+
+        pcall(function()
+            myHRP.CFrame = orbitCFrame
+            local humanoid = getLocalHumanoid()
+            if humanoid then
+                for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+                    local animationId = track.Animation and track.Animation.AnimationId or ""
+                    if animationId:find("3541114300") or animationId:find("3084858603") or animationId:find("13850634687") then
+                        track:Stop()
+                    end
+                end
+            end
+        end)
+    end)
+
+    return function()
+        if connection then
+            connection:Disconnect()
+            connection = nil
+        end
+    end
+end
 
 -- TargetMelee function from stando.luau
 local function TargetMelee(target)
@@ -792,13 +867,22 @@ end)
 
 -- Gun command (buys LMG)
 API.Create("gun", function(args)
-    API.sendChat("Buying LMG...")
+    local alreadyOwned = hasTool(GUN_NAME)
+    if alreadyOwned then
+        API.sendChat("LMG detected, restocking ammo...")
+    else
+        API.sendChat("Buying LMG and ammo...")
+    end
     Stand.Attacking = false
     Stand.Following = false
     task.spawn(function()
-        local success, msg = buyLMG(8)
+        local success, result = buyLMG(8)
         if success then
-            API.sendChat("LMG purchased with ammo!")
+            if result == "ammo_only" then
+                API.sendChat("LMG ammo restocked!")
+            else
+                API.sendChat("LMG purchased with ammo!")
+            end
             local ownerRoot = getRoot(API.ownerPlayer)
             local myHRP = getLocalHRP()
             if ownerRoot and myHRP then
@@ -809,7 +893,7 @@ API.Create("gun", function(args)
             task.wait(0.3)
             Stand.Following = true
         else
-            API.sendChat("Failed to buy LMG: " .. (msg or "unknown error"))
+            API.sendChat("Failed to buy LMG: " .. (result or "unknown error"))
         end
     end)
 end)
@@ -846,14 +930,47 @@ API.Create("gknock", function(args)
     API.currentFollowTarget = nil
     API.sendChat("Gun knocking " .. target.Name .. "...")
     task.spawn(function()
-        local success, msg = gunKnockTarget(target, {timeout = 30, gunName = GUN_NAME})
+        local stopStrafe = startGunStrafe(target, {mode = "Sky", height = 8, radius = 10})
+        
+        local startTime = tick()
+        local timeout = 30
+        
+        while target.Character and not isDead(target) and targetKO.Value == false do
+            if tick() - startTime > timeout then
+                API.sendChat("Gun knock timeout!")
+                break
+            end
+            
+            local gun = ensureToolEquipped(GUN_NAME)
+            if not gun then
+                API.sendChat("Lost weapon!")
+                break
+            end
+            
+            local shotSuccess = shootTargetWithGun(target, gun)
+            if not shotSuccess then
+                API.sendChat("Failed to shoot!")
+                break
+            end
+            
+            reloadGunIfNeeded(gun)
+            RunService.Heartbeat:Wait()
+        end
+        
+        stopStrafe()
+        
+        local localHumanoid = getLocalHumanoid()
+        if localHumanoid then
+            Workspace.Camera.CameraSubject = localHumanoid
+        end
+        
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
-        if success then
+        
+        if targetKO.Value == true then
             API.sendChat(target.Name .. " has been gun knocked out!")
-        else
-            API.sendChat("GKnock " .. (msg or "failed"))
         end
+        
         if API.Summon then
             task.wait(0.5)
             API.Summon()
@@ -889,15 +1006,51 @@ API.Create("gstomp", function(args)
     API.currentFollowTarget = nil
     API.sendChat("Gun stomping " .. target.Name .. "...")
     task.spawn(function()
+        local stopStrafe = nil
+        
         if targetKO.Value == false then
-            local success, msg = gunKnockTarget(target, {timeout = 30, gunName = GUN_NAME})
-            if not success then
-                API.sendChat("Failed to knock: " .. (msg or "unknown"))
-                Stand.Following = originalFollowing
-                API.currentFollowTarget = originalTarget
-                return
+            stopStrafe = startGunStrafe(target, {mode = "Sky", height = 8, radius = 10})
+            
+            local startTime = tick()
+            local timeout = 30
+            
+            while target.Character and not isDead(target) and targetKO.Value == false do
+                if tick() - startTime > timeout then
+                    API.sendChat("Gun knock timeout!")
+                    if stopStrafe then stopStrafe() end
+                    Stand.Following = originalFollowing
+                    API.currentFollowTarget = originalTarget
+                    return
+                end
+                
+                local gun = ensureToolEquipped(GUN_NAME)
+                if not gun then
+                    API.sendChat("Lost weapon!")
+                    if stopStrafe then stopStrafe() end
+                    Stand.Following = originalFollowing
+                    API.currentFollowTarget = originalTarget
+                    return
+                end
+                
+                local shotSuccess = shootTargetWithGun(target, gun)
+                if not shotSuccess then
+                    API.sendChat("Failed to shoot!")
+                    if stopStrafe then stopStrafe() end
+                    Stand.Following = originalFollowing
+                    API.currentFollowTarget = originalTarget
+                    return
+                end
+                
+                reloadGunIfNeeded(gun)
+                RunService.Heartbeat:Wait()
+            end
+            
+            if stopStrafe then
+                stopStrafe()
+                stopStrafe = nil
             end
         end
+        
         if targetKO.Value == true and not isDead(target) then
             stompTarget(target)
             task.wait(0.5)
@@ -907,8 +1060,15 @@ API.Create("gstomp", function(args)
                 API.sendChat("Stomped " .. target.Name)
             end
         end
+        
+        local localHumanoid = getLocalHumanoid()
+        if localHumanoid then
+            Workspace.Camera.CameraSubject = localHumanoid
+        end
+        
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
+        
         if API.Summon then
             task.wait(0.5)
             API.Summon()
