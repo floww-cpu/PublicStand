@@ -134,6 +134,40 @@ local function markKillerFromBodyEffects(bodyEffects, reason)
     end
 end
 
+local function detectStomper(character)
+    if not character then return nil end
+    local upperTorso = character:FindFirstChild("UpperTorso")
+    if not upperTorso then return nil end
+    
+    local upperTorsoPos = upperTorso.Position
+    local closestPlayer = nil
+    local bestScore = math.huge
+    
+    local HORIZONTAL_THRESHOLD = 4
+    local VERTICAL_MIN = 0.5
+    local VERTICAL_MAX = 6
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local theirRoot = getRoot(player)
+            if theirRoot then
+                local offset = theirRoot.Position - upperTorsoPos
+                local horizontalDistance = Vector3.new(offset.X, 0, offset.Z).Magnitude
+                local verticalDistance = offset.Y
+                if horizontalDistance <= HORIZONTAL_THRESHOLD and verticalDistance >= VERTICAL_MIN and verticalDistance <= VERTICAL_MAX then
+                    local score = horizontalDistance + math.abs(verticalDistance - VERTICAL_MIN)
+                    if score < bestScore then
+                        bestScore = score
+                        closestPlayer = player
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
 local function attachRevengeTracker(character)
     if not character then return end
     task.spawn(function()
@@ -154,6 +188,14 @@ local function attachRevengeTracker(character)
             if not valueObj then return end
             valueObj:GetPropertyChangedSignal("Value"):Connect(function()
                 if valueObj.Value == true then
+                    if label == "Dead" then
+                        local stomper = detectStomper(character)
+                        if stomper then
+                            lastKiller = stomper
+                            print(string.format("[Revenge Tracker] Detected stomper: %s (standing on UpperTorso)", stomper.Name))
+                            return
+                        end
+                    end
                     markKillerFromBodyEffects(bodyEffects, label)
                 end
             end)
@@ -1662,6 +1704,256 @@ API.Create("revenge", function(args)
     end
 end)
 
+-- Mask command - puts on mask
+API.Create("mask", function(args)
+    local hrp = getLocalHRP()
+    if not hrp then
+        API.sendChat("HRP missing!")
+        return
+    end
+    
+    local character = getLocalCharacter()
+    if not character then
+        API.sendChat("Character missing!")
+        return
+    end
+    
+    local humanoid = getLocalHumanoid()
+    if not humanoid then
+        API.sendChat("Humanoid missing!")
+        return
+    end
+    
+    API.sendChat("Buying mask...")
+    
+    local maskItemName = "[Other Mask] - $66"
+    local maskToolName = "[Mask]"
+    
+    local shopFolder = getShopFolder()
+    if not shopFolder then
+        API.sendChat("Shop folder missing!")
+        return
+    end
+    
+    local shopItem = shopFolder:FindFirstChild(maskItemName)
+    if not shopItem then
+        API.sendChat("Mask shop item not found!")
+        return
+    end
+    
+    local head = shopItem:FindFirstChild("Head")
+    local detector = shopItem:FindFirstChild("ClickDetector")
+    if not head or not detector then
+        API.sendChat("Mask shop item incomplete!")
+        return
+    end
+    
+    humanoid:UnequipTools()
+    task.wait(0.1)
+    
+    local originalCFrame = hrp.CFrame
+    pcall(function()
+        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
+    end)
+    
+    task.wait(0.15)
+    
+    local clickFunction = getClickDetectorFunc()
+    if not clickFunction then
+        pcall(function()
+            hrp.CFrame = originalCFrame
+        end)
+        API.sendChat("fireclickdetector unavailable!")
+        return
+    end
+    
+    local success = false
+    for _ = 1, 5 do
+        pcall(function()
+            clickFunction(detector)
+        end)
+        task.wait(0.2)
+        if LocalPlayer.Backpack:FindFirstChild(maskToolName) then
+            success = true
+            break
+        end
+    end
+    
+    if success then
+        task.wait(0.1)
+        local maskTool = LocalPlayer.Backpack:FindFirstChild(maskToolName)
+        if maskTool then
+            maskTool.Parent = character
+            task.wait(0.1)
+            local equippedMask = character:FindFirstChild(maskToolName)
+            if equippedMask then
+                equippedMask:Activate()
+                task.wait(0.1)
+                humanoid:UnequipTools()
+                API.sendChat("Mask equipped!")
+            end
+        end
+    else
+        API.sendChat("Failed to buy mask!")
+    end
+    
+    pcall(function()
+        hrp.CFrame = originalCFrame
+    end)
+end)
+
+-- AMask command - automatically puts on mask when no mask is equipped
+local amaskActive = false
+local amaskConnection = nil
+local amaskBuying = false
+
+API.Create("amask", function(args)
+    if amaskActive then
+        API.sendChat("AMask already active!")
+        return
+    end
+    
+    amaskActive = true
+    API.sendChat("AMask activated - will auto-equip mask when missing")
+    
+    local function checkAndEquipMask()
+        if not amaskActive or amaskBuying then return end
+        amaskBuying = true
+        
+        task.spawn(function()
+            local character = getLocalCharacter()
+            if not character then
+                amaskBuying = false
+                return
+            end
+            
+            local bodyEffects = character:FindFirstChild("BodyEffects")
+            if not bodyEffects then
+                amaskBuying = false
+                return
+            end
+            
+            local mask = bodyEffects:FindFirstChild("Mask")
+            if mask and mask.Value ~= nil then
+                amaskBuying = false
+                return
+            end
+            
+            local humanoid = getLocalHumanoid()
+            if not humanoid then
+                amaskBuying = false
+                return
+            end
+            
+            local hrp = getLocalHRP()
+            if not hrp then
+                amaskBuying = false
+                return
+            end
+            
+            local maskToolName = "[Mask]"
+            local maskItemName = "[Other Mask] - $66"
+            
+            local shopFolder = getShopFolder()
+            if not shopFolder then
+                amaskBuying = false
+                return
+            end
+            
+            local shopItem = shopFolder:FindFirstChild(maskItemName)
+            if not shopItem then
+                amaskBuying = false
+                return
+            end
+            
+            local head = shopItem:FindFirstChild("Head")
+            local detector = shopItem:FindFirstChild("ClickDetector")
+            if not head or not detector then
+                amaskBuying = false
+                return
+            end
+            
+            local originalCFrame = hrp.CFrame
+            humanoid:UnequipTools()
+            task.wait(0.1)
+            
+            pcall(function()
+                hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
+            end)
+            
+            task.wait(0.15)
+            
+            local clickFunction = getClickDetectorFunc()
+            if not clickFunction then
+                pcall(function()
+                    hrp.CFrame = originalCFrame
+                end)
+                amaskBuying = false
+                return
+            end
+            
+            for _ = 1, 5 do
+                pcall(function()
+                    clickFunction(detector)
+                end)
+                task.wait(0.2)
+                if LocalPlayer.Backpack:FindFirstChild(maskToolName) then
+                    break
+                end
+            end
+            
+            task.wait(0.1)
+            local maskTool = LocalPlayer.Backpack:FindFirstChild(maskToolName)
+            if maskTool then
+                maskTool.Parent = character
+                task.wait(0.1)
+                local equippedMask = character:FindFirstChild(maskToolName)
+                if equippedMask then
+                    equippedMask:Activate()
+                    task.wait(0.1)
+                    humanoid:UnequipTools()
+                    print("[AMask] Auto-equipped mask")
+                end
+            end
+            
+            pcall(function()
+                hrp.CFrame = originalCFrame
+            end)
+            
+            amaskBuying = false
+        end)
+    end
+    
+    amaskConnection = RunService.Heartbeat:Connect(function()
+        if not amaskActive or amaskBuying then return end
+        
+        local character = getLocalCharacter()
+        if not character then return end
+        
+        local bodyEffects = character:FindFirstChild("BodyEffects")
+        if not bodyEffects then return end
+        
+        local mask = bodyEffects:FindFirstChild("Mask")
+        if not mask or mask.Value == nil then
+            pcall(checkAndEquipMask)
+        end
+    end)
+end)
+
+API.Create("unamask", function(args)
+    if not amaskActive then
+        API.sendChat("AMask not active!")
+        return
+    end
+    
+    amaskActive = false
+    if amaskConnection then
+        amaskConnection:Disconnect()
+        amaskConnection = nil
+    end
+    API.sendChat("AMask deactivated")
+end)
+
 -- Chair destroyer (from memory - prevents stand from sitting)
 task.spawn(function()
     task.wait(2)
@@ -1706,6 +1998,6 @@ task.spawn(function()
 end)
 
 print("[Da Hood Config] Loaded successfully!")
-print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge")
+print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge, mask, amask, unamask")
 print("[Da Hood Config] Prediction: 0.155 (AutoPredic from stando script)")
 print("[Da Hood Config] Revenge tracking active - will remember who kills/stomps the owner")
