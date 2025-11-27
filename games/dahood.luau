@@ -1704,6 +1704,56 @@ API.Create("revenge", function(args)
     end
 end)
 
+-- Drop command - drops grabbed player/item
+API.Create("drop", function(args)
+    if not MainEvent then
+        API.sendChat("MainEvent not found!")
+        return
+    end
+    
+    MainEvent:FireServer("Grabbing")
+    API.sendChat("Dropped!")
+end)
+
+-- Wallet command - equips wallet
+API.Create("wallet", function(args)
+    local character = getLocalCharacter()
+    local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
+    if not character or not backpack then
+        API.sendChat("Cannot equip wallet - missing character/backpack!")
+        return
+    end
+    
+    local walletTool = backpack:FindFirstChild("Wallet")
+    if walletTool then
+        walletTool.Parent = character
+        API.sendChat("Wallet equipped!")
+    else
+        API.sendChat("Wallet not found in backpack!")
+    end
+end)
+
+local function dropTenK()
+    if not MainEvent then
+        API.sendChat("MainEvent not found!")
+        return false
+    end
+    
+    MainEvent:FireServer("DropMoney", "10000")
+    API.sendChat("Dropped $10,000!")
+    return true
+end
+
+-- DropCash command - drops $10,000
+API.Create("dropcash", function(args)
+    dropTenK()
+end)
+
+-- Dcash alias for dropcash
+API.Create("dcash", function(args)
+    dropTenK()
+end)
+
 -- Mask command - puts on mask
 API.Create("mask", function(args)
     local hrp = getLocalHRP()
@@ -1726,7 +1776,7 @@ API.Create("mask", function(args)
     
     API.sendChat("Buying mask...")
     
-    local maskItemName = "[Other Mask] - $66"
+    local maskItemName = "[Surgeon Mask] - $27"
     local maskToolName = "[Mask]"
     
     local shopFolder = getShopFolder()
@@ -1852,7 +1902,7 @@ API.Create("amask", function(args)
             end
             
             local maskToolName = "[Mask]"
-            local maskItemName = "[Other Mask] - $66"
+            local maskItemName = "[Surgeon Mask] - $27"
             
             local shopFolder = getShopFolder()
             if not shopFolder then
@@ -1998,6 +2048,6 @@ task.spawn(function()
 end)
 
 print("[Da Hood Config] Loaded successfully!")
-print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge, mask, amask, unamask")
+print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge, drop, wallet, dropcash/dcash, mask, amask, unamask")
 print("[Da Hood Config] Prediction: 0.155 (AutoPredic from stando script)")
 print("[Da Hood Config] Revenge tracking active - will remember who kills/stomps the owner")
