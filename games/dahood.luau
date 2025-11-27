@@ -2064,6 +2064,347 @@ task.spawn(function()
     end)
 end)
 
+-- AutoKill / GAutoKill command handling
+local autokillState = {
+    active = false,
+    connection = nil,
+    target = nil,
+    originalFollowing = nil,
+    originalTarget = nil,
+    lastStomp = 0
+}
+
+local gautokillState = {
+    active = false,
+    connection = nil,
+    target = nil,
+    originalFollowing = nil,
+    originalTarget = nil,
+    stopStrafe = nil,
+    lastStomp = 0,
+    ammoRequested = false
+}
+
+local function restoreStandState(state)
+    if state.originalFollowing ~= nil then
+        Stand.Following = state.originalFollowing
+        state.originalFollowing = nil
+    end
+    if state.originalTarget ~= nil then
+        API.currentFollowTarget = state.originalTarget
+        state.originalTarget = nil
+    end
+end
+
+local function stopAutokill(reason)
+    if autokillState.connection then
+        autokillState.connection:Disconnect()
+        autokillState.connection = nil
+    end
+    if not autokillState.active then
+        autokillState.target = nil
+        autokillState.lastStomp = 0
+        return
+    end
+    autokillState.active = false
+    autokillState.target = nil
+    autokillState.lastStomp = 0
+    restoreStandState(autokillState)
+    local humanoid = getLocalHumanoid()
+    if humanoid then
+        Workspace.Camera.CameraSubject = humanoid
+    end
+    if reason then
+        API.sendChat(reason)
+    end
+end
+
+local function stopGautokill(reason)
+    if gautokillState.connection then
+        gautokillState.connection:Disconnect()
+        gautokillState.connection = nil
+    end
+    if gautokillState.stopStrafe then
+        gautokillState.stopStrafe()
+        gautokillState.stopStrafe = nil
+    end
+    if not gautokillState.active then
+        gautokillState.target = nil
+        gautokillState.lastStomp = 0
+        gautokillState.ammoRequested = false
+        return
+    end
+    gautokillState.active = false
+    gautokillState.target = nil
+    gautokillState.lastStomp = 0
+    gautokillState.ammoRequested = false
+    restoreStandState(gautokillState)
+    unequipAllTools()
+    local humanoid = getLocalHumanoid()
+    if humanoid then
+        Workspace.Camera.CameraSubject = humanoid
+    end
+    if reason then
+        API.sendChat(reason)
+    end
+end
+
+local function startAutokillLoop(target)
+    autokillState.originalFollowing = Stand.Following
+    autokillState.originalTarget = API.currentFollowTarget
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    autokillState.target = target
+    autokillState.active = true
+    autokillState.lastStomp = 0
+
+    autokillState.connection = RunService.Heartbeat:Connect(function()
+        if not autokillState.active then
+            return
+        end
+
+        local success, err = pcall(function()
+            local trackedTarget = autokillState.target
+            if not trackedTarget or trackedTarget.Parent ~= Players then
+                stopAutokill("Target unavailable, AutoKill stopped.")
+                return
+            end
+
+            local targetCharacter = trackedTarget.Character
+            if not targetCharacter then
+                return
+            end
+
+            local targetKO = KO(trackedTarget)
+            if not targetKO then
+                stopAutokill("Target invalid, AutoKill stopped.")
+                return
+            end
+
+            if targetKO.Value == false and not isDead(trackedTarget) then
+                autokillState.lastStomp = 0
+                local character = getLocalCharacter()
+                if character and not character:FindFirstChild("Combat") then
+                    local backpack = LocalPlayer:FindFirstChild("Backpack")
+                    if backpack then
+                        local combat = backpack:FindFirstChild("Combat")
+                        if combat then
+                            combat.Parent = character
+                        end
+                    end
+                end
+                if MainEvent then
+                    MainEvent:FireServer("ChargeButton")
+                end
+                TargetMelee(trackedTarget)
+            else
+                local attackingValue = Attacking(LocalPlayer)
+                if attackingValue and attackingValue.Value == true then
+                    local myHRP = getLocalHRP()
+                    local targetRoot = getRoot(trackedTarget)
+                    if myHRP and targetRoot then
+                        pcall(function()
+                            myHRP.CFrame = targetRoot.CFrame * CFrame.new(0, 300, 0)
+                        end)
+                    end
+                    return
+                end
+
+                if not isDead(trackedTarget) then
+                    if tick() - autokillState.lastStomp > 0.75 then
+                        if stompTarget(trackedTarget) then
+                            autokillState.lastStomp = tick()
+                        end
+                    end
+                else
+                    local ownerRoot = getRoot(API.ownerPlayer)
+                    local myHRP = getLocalHRP()
+                    if ownerRoot and myHRP then
+                        pcall(function()
+                            myHRP.CFrame = ownerRoot.CFrame * CFrame.new(0, 2, 3)
+                        end)
+                    end
+                end
+            end
+        end)
+
+        if not success and autokillState.active then
+            warn("[AutoKill] " .. tostring(err))
+        end
+    end)
+end
+
+local function startGautokillLoop(target)
+    gautokillState.originalFollowing = Stand.Following
+    gautokillState.originalTarget = API.currentFollowTarget
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    gautokillState.target = target
+    gautokillState.active = true
+    gautokillState.lastStomp = 0
+    gautokillState.ammoRequested = false
+
+    gautokillState.connection = RunService.Heartbeat:Connect(function()
+        if not gautokillState.active then
+            return
+        end
+
+        local success, err = pcall(function()
+            local trackedTarget = gautokillState.target
+            if not trackedTarget or trackedTarget.Parent ~= Players then
+                stopGautokill("Target unavailable, GAutoKill stopped.")
+                return
+            end
+
+            local targetCharacter = trackedTarget.Character
+            if not targetCharacter then
+                return
+            end
+
+            local targetKO = KO(trackedTarget)
+            if not targetKO then
+                stopGautokill("Target invalid, GAutoKill stopped.")
+                return
+            end
+
+            local gun = ensureToolEquipped(GUN_NAME)
+            if not gun then
+                stopGautokill("Missing LMG, GAutoKill stopped.")
+                return
+            end
+
+            if targetKO.Value == false and not isDead(trackedTarget) then
+                gautokillState.lastStomp = 0
+                gautokillState.ammoRequested = false
+                if not gautokillState.stopStrafe then
+                    gautokillState.stopStrafe = startGunStrafe(trackedTarget, {mode = "Sky", height = 8, radius = 10})
+                end
+                local shotSuccess = shootTargetWithGun(trackedTarget, gun)
+                if not shotSuccess then
+                    stopGautokill("Failed to shoot target, GAutoKill stopped.")
+                    return
+                end
+                reloadGunIfNeeded(gun)
+            else
+                if gautokillState.stopStrafe then
+                    gautokillState.stopStrafe()
+                    gautokillState.stopStrafe = nil
+                end
+
+                local attackingValue = Attacking(LocalPlayer)
+                if attackingValue and attackingValue.Value == true then
+                    local myHRP = getLocalHRP()
+                    local targetRoot = getRoot(trackedTarget)
+                    if myHRP and targetRoot then
+                        pcall(function()
+                            myHRP.CFrame = targetRoot.CFrame * CFrame.new(0, 300, 0)
+                        end)
+                    end
+                    return
+                end
+
+                if not isDead(trackedTarget) then
+                    if tick() - gautokillState.lastStomp > 0.75 then
+                        if stompTarget(trackedTarget) then
+                            gautokillState.lastStomp = tick()
+                        end
+                    end
+                else
+                    if not gautokillState.ammoRequested then
+                        gautokillState.ammoRequested = true
+                        task.spawn(function()
+                            local success, errMsg = buyShopItem(LMG_AMMO_ITEM, nil, 1)
+                            if not success and errMsg then
+                                warn("[GAutoKill] Failed to buy ammo: " .. tostring(errMsg))
+                            end
+                        end)
+                    end
+
+                    local ownerRoot = getRoot(API.ownerPlayer)
+                    local myHRP = getLocalHRP()
+                    if ownerRoot and myHRP then
+                        pcall(function()
+                            myHRP.CFrame = ownerRoot.CFrame * CFrame.new(0, 2, 3)
+                        end)
+                    end
+                end
+            end
+        end)
+
+        if not success and gautokillState.active then
+            warn("[GAutoKill] " .. tostring(err))
+        end
+    end)
+end
+
+local function autokillCommand(args)
+    if autokillState.active then
+        API.sendChat("AutoKill already running!")
+        return
+    end
+
+    stopGautokill()
+
+    local target = select(1, resolveTargetFromArgs(args))
+    if not target then
+        API.sendChat("Target not found!")
+        return
+    end
+
+    startAutokillLoop(target)
+    API.sendChat("AutoKill locked on " .. target.Name .. " (type 'summon' or 'stop' to cancel)")
+end
+
+API.Create("autokill", autokillCommand)
+API.Create("auto", autokillCommand)
+
+local function gautokillCommand(args)
+    if gautokillState.active then
+        API.sendChat("GAutoKill already running!")
+        return
+    end
+
+    stopAutokill()
+
+    local target = select(1, resolveTargetFromArgs(args))
+    if not target then
+        API.sendChat("Target not found!")
+        return
+    end
+
+    local gun = ensureToolEquipped(GUN_NAME)
+    if not gun then
+        API.sendChat("No LMG found! Use 'gun' command first.")
+        return
+    end
+
+    startGautokillLoop(target)
+    API.sendChat("GAutoKill locked on " .. target.Name .. " (type 'summon' or 'stop' to cancel)")
+end
+
+API.Create("gautokill", gautokillCommand)
+API.Create("gauto", gautokillCommand)
+
+local originalStopFunction = API.Stop
+API.Stop = function(...)
+    stopAutokill()
+    stopGautokill()
+    if originalStopFunction then
+        return originalStopFunction(...)
+    end
+end
+
+local originalSummonFunction = API.Summon
+API.Summon = function(...)
+    stopAutokill()
+    stopGautokill()
+    if originalSummonFunction then
+        return originalSummonFunction(...)
+    end
+end
+
 -- Auto-activate AMask if configured
 if DahoodMainConfig.Automask == true and not amaskActive then
     task.spawn(function()
@@ -2135,7 +2476,7 @@ if DahoodMainConfig.Automask == true and not amaskActive then
 end
 
 print("[Da Hood Config] Loaded successfully!")
-print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge, drop, wallet, dropcash/dcash, mask, amask, unamask")
+print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge, drop, wallet, dropcash/dcash, mask, amask, unamask, autokill/auto, gautokill/gauto")
 print("[Da Hood Config] Prediction: 0.155 (AutoPredic from stando script)")
 print("[Da Hood Config] Revenge tracking active - will remember who kills/stomps the owner")
 print("[Da Hood Config] Config: getgenv().SocietyStand.Dahood.Main.Automask = " .. tostring(DahoodMainConfig.Automask))
