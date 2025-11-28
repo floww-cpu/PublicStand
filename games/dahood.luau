@@ -2122,9 +2122,14 @@ local gautokillState = {
     originalTarget = nil,
     stopStrafe = nil,
     lastStomp = 0,
-    ammoRequested = false,
     holdConnection = nil,
-    lastKnownPosition = nil
+    lastKnownPosition = nil,
+    holdAnchor = nil,
+    buyingGun = false,
+    restockingAmmo = false,
+    needsAmmo = false,
+    awaitingRespawn = false,
+    shootFailureCount = 0
 }
 
 local function stopGautokillHold()
@@ -2132,37 +2137,124 @@ local function stopGautokillHold()
         gautokillState.holdConnection:Disconnect()
         gautokillState.holdConnection = nil
     end
+    gautokillState.holdAnchor = nil
 end
 
 local function ensureGautokillHold(anchorPosition)
     if anchorPosition then
         gautokillState.lastKnownPosition = anchorPosition
+        gautokillState.holdAnchor = anchorPosition
+    elseif not gautokillState.holdAnchor then
+        gautokillState.holdAnchor = gautokillState.lastKnownPosition
     end
-    if gautokillState.holdConnection or not gautokillState.lastKnownPosition then
+
+    if gautokillState.holdConnection or not gautokillState.holdAnchor then
         return
     end
 
-    local angle = math.random() * math.pi * 2
+    local orbitAngle = math.random() * math.pi * 2
+    local driftAngle = math.random() * math.pi * 2
     gautokillState.holdConnection = RunService.Heartbeat:Connect(function(dt)
-        if not gautokillState.active then
+        if not gautokillState.active or not gautokillState.awaitingRespawn then
             stopGautokillHold()
             return
         end
 
         local myHRP = getLocalHRP()
-        local anchor = gautokillState.lastKnownPosition
+        local anchor = gautokillState.holdAnchor or gautokillState.lastKnownPosition
         if not myHRP or not anchor then
             return
         end
 
-        angle = (angle + ((2 * math.pi) / 0.35) * dt) % (math.pi * 2)
-        local orbitCenter = anchor + Vector3.new(0, 250, 0)
-        local orbitCFrame = CFrame.new(orbitCenter) * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, 150)
+        orbitAngle = (orbitAngle + ((2 * math.pi) / 0.18) * dt) % (math.pi * 2)
+        driftAngle = (driftAngle + ((2 * math.pi) / 5.5) * dt) % (math.pi * 2)
+
+        local driftCenter = anchor + Vector3.new(math.cos(driftAngle) * 800, 0, math.sin(driftAngle) * 800)
+        local orbitCenter = driftCenter + Vector3.new(0, 350, 0)
+        local orbitCFrame = CFrame.new(orbitCenter) * CFrame.Angles(0, orbitAngle, 0) * CFrame.new(0, 0, 550)
 
         pcall(function()
             myHRP.CFrame = orbitCFrame
         end)
     end)
+end
+
+local function markGautokillNeedsAmmo()
+    gautokillState.needsAmmo = true
+end
+
+local function requestGautokillGun()
+    if gautokillState.buyingGun or not gautokillState.active then
+        return false
+    end
+    if not getLocalHRP() then
+        return false
+    end
+
+    gautokillState.buyingGun = true
+    stopGautokillHold()
+    if gautokillState.stopStrafe then
+        pcall(function()
+            gautokillState.stopStrafe()
+        end)
+        gautokillState.stopStrafe = nil
+    end
+
+    task.spawn(function()
+        local success, message = buyLMG(8)
+        if not success and message then
+            warn("[GAutoKill] Failed to buy LMG: " .. tostring(message))
+        end
+        if success then
+            markGautokillNeedsAmmo()
+        end
+        gautokillState.buyingGun = false
+    end)
+
+    return true
+end
+
+local function requestGautokillAmmo(bundles)
+    if gautokillState.restockingAmmo or not gautokillState.active then
+        return false
+    end
+    if not hasTool(GUN_NAME) or not getLocalHRP() then
+        return false
+    end
+
+    gautokillState.restockingAmmo = true
+    stopGautokillHold()
+    if gautokillState.stopStrafe then
+        pcall(function()
+            gautokillState.stopStrafe()
+        end)
+        gautokillState.stopStrafe = nil
+    end
+
+    task.spawn(function()
+        local purchaseCount = math.max(bundles or 2, 1)
+        local successCount = 0
+        for _ = 1, purchaseCount do
+            local success, errMsg = buyShopItem(LMG_AMMO_ITEM, nil, 1)
+            if success then
+                successCount += 1
+            else
+                if errMsg then
+                    warn("[GAutoKill] Ammo purchase failed: " .. tostring(errMsg))
+                end
+                if errMsg == "HumanoidRootPart missing" then
+                    break
+                end
+            end
+            task.wait(0.25)
+        end
+        if successCount > 0 then
+            gautokillState.needsAmmo = false
+        end
+        gautokillState.restockingAmmo = false
+    end)
+
+    return true
 end
 
 local function restoreStandState(state)
@@ -2219,8 +2311,13 @@ local function stopGautokill(reason)
     
     gautokillState.target = nil
     gautokillState.lastStomp = 0
-    gautokillState.ammoRequested = false
     gautokillState.lastKnownPosition = nil
+    gautokillState.holdAnchor = nil
+    gautokillState.buyingGun = false
+    gautokillState.restockingAmmo = false
+    gautokillState.needsAmmo = false
+    gautokillState.awaitingRespawn = false
+    gautokillState.shootFailureCount = 0
     
     restoreStandState(gautokillState)
     unequipAllTools()
@@ -2319,8 +2416,13 @@ local function startGautokillLoop(target)
     gautokillState.target = target
     gautokillState.active = true
     gautokillState.lastStomp = 0
-    gautokillState.ammoRequested = false
     gautokillState.lastKnownPosition = nil
+    gautokillState.holdAnchor = nil
+    gautokillState.buyingGun = false
+    gautokillState.restockingAmmo = false
+    gautokillState.needsAmmo = true
+    gautokillState.awaitingRespawn = false
+    gautokillState.shootFailureCount = 0
     stopGautokillHold()
 
     gautokillState.connection = RunService.Heartbeat:Connect(function()
@@ -2336,43 +2438,80 @@ local function startGautokillLoop(target)
             end
 
             local targetCharacter = trackedTarget.Character
-            if not targetCharacter then
-                stopGautokillHold()
+            local targetKO = targetCharacter and KO(trackedTarget)
+            if targetCharacter and targetKO then
+                local targetRoot = getRoot(trackedTarget)
+                if targetRoot then
+                    gautokillState.lastKnownPosition = targetRoot.Position
+                    if not gautokillState.awaitingRespawn then
+                        gautokillState.holdAnchor = targetRoot.Position
+                    end
+                end
+            end
+
+            local localCharacter = getLocalCharacter()
+            local humanoid = getLocalHumanoid()
+            local hrp = getLocalHRP()
+            local localDead = not localCharacter or not humanoid or not hrp or isDead(LocalPlayer)
+
+            if localDead then
+                markGautokillNeedsAmmo()
                 if gautokillState.stopStrafe then
                     gautokillState.stopStrafe()
                     gautokillState.stopStrafe = nil
                 end
-                if gautokillState.lastKnownPosition then
-                    ensureGautokillHold(gautokillState.lastKnownPosition)
-                end
+                stopGautokillHold()
                 return
             end
 
-            local targetKO = KO(trackedTarget)
-            if not targetKO then
+            if gautokillState.buyingGun or gautokillState.restockingAmmo then
+                return
+            end
+
+            if not hasTool(GUN_NAME) then
+                requestGautokillGun()
                 return
             end
 
             local gun = ensureToolEquipped(GUN_NAME)
             if not gun then
-                stopGautokill("Missing LMG, GAutoKill stopped.")
+                requestGautokillGun()
+                return
+            end
+
+            if gautokillState.needsAmmo then
+                requestGautokillAmmo(3)
+                return
+            end
+
+            if not targetCharacter or not targetKO then
+                gautokillState.awaitingRespawn = true
+                ensureGautokillHold(gautokillState.lastKnownPosition or hrp.Position)
                 return
             end
 
             if targetKO.Value == false and not isDead(trackedTarget) then
+                gautokillState.awaitingRespawn = false
                 gautokillState.lastStomp = 0
-                gautokillState.ammoRequested = false
                 stopGautokillHold()
                 if not gautokillState.stopStrafe then
                     gautokillState.stopStrafe = startGunStrafe(trackedTarget, {mode = "Sky", height = 8, radius = 10})
                 end
+
                 local shotSuccess = shootTargetWithGun(trackedTarget, gun)
                 if not shotSuccess then
-                    stopGautokill("Failed to shoot target, GAutoKill stopped.")
+                    gautokillState.shootFailureCount = gautokillState.shootFailureCount + 1
+                    if gautokillState.shootFailureCount >= 5 then
+                        markGautokillNeedsAmmo()
+                        gautokillState.shootFailureCount = 0
+                    end
                     return
                 end
+
+                gautokillState.shootFailureCount = 0
                 reloadGunIfNeeded(gun)
             else
+                gautokillState.shootFailureCount = 0
                 if gautokillState.stopStrafe then
                     gautokillState.stopStrafe()
                     gautokillState.stopStrafe = nil
@@ -2395,23 +2534,16 @@ local function startGautokillLoop(target)
                     if tick() - gautokillState.lastStomp > 0.75 then
                         if stompTarget(trackedTarget) then
                             gautokillState.lastStomp = tick()
+                            markGautokillNeedsAmmo()
                         end
                     end
                 else
-                    if not gautokillState.ammoRequested then
-                        gautokillState.ammoRequested = true
-                        task.spawn(function()
-                            local success, errMsg = buyShopItem(LMG_AMMO_ITEM, nil, 1)
-                            if not success and errMsg then
-                                warn("[GAutoKill] Failed to buy ammo: " .. tostring(errMsg))
-                            end
-                        end)
+                    gautokillState.awaitingRespawn = true
+                    if gautokillState.needsAmmo then
+                        requestGautokillAmmo(3)
+                        return
                     end
-                    
-                    local targetRoot = getRoot(trackedTarget)
-                    if targetRoot then
-                        ensureGautokillHold(targetRoot.Position)
-                    end
+                    ensureGautokillHold(gautokillState.lastKnownPosition or hrp.Position)
                 end
             end
         end)
@@ -2454,12 +2586,6 @@ local function gautokillCommand(args)
     local target = select(1, resolveTargetFromArgs(args))
     if not target then
         API.sendChat("Target not found!")
-        return
-    end
-
-    local gun = ensureToolEquipped(GUN_NAME)
-    if not gun then
-        API.sendChat("No LMG found! Use 'gun' command first.")
         return
     end
 
