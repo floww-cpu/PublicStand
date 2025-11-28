@@ -6,7 +6,7 @@ SocietyStandConfig.Dahood = SocietyStandConfig.Dahood or {}
 SocietyStandConfig.Dahood.Main = SocietyStandConfig.Dahood.Main or {}
 
 if SocietyStandConfig.Dahood.Main.AntiStomp == nil then
-    SocietyStandConfig.Dahood.Main.AntiStomp = true
+    SocietyStandConfig.Dahood.Main.AntiStomp = false
 end
 
 if SocietyStandConfig.Dahood.Main.Automask == nil then
