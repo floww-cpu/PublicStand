@@ -1,11 +1,10 @@
 local globalEnv = getgenv()
-globalEnv.SocietyStandConfig = globalEnv.SocietyStandConfig or {}
-
+local SocietyStandConfig = globalEnv.SocietyStandConfig or {}
+local DahoodConfig = SocietyStandConfig.Dahood or {}
+local DahoodMainConfig = DahoodConfig.Main or {}
 local SocietyStandConfig = globalEnv.SocietyStandConfig
-
 SocietyStandConfig.Dahood = type(SocietyStandConfig.Dahood) == "table" and SocietyStandConfig.Dahood or {}
 SocietyStandConfig.Dahood.Main = type(SocietyStandConfig.Dahood.Main) == "table" and SocietyStandConfig.Dahood.Main or {}
-
 SocietyStandConfig.Dahood.Main.AntiStomp = (SocietyStandConfig.Dahood.Main.AntiStomp == nil) and true or SocietyStandConfig.Dahood.Main.AntiStomp
 SocietyStandConfig.Dahood.Main.Automask = (SocietyStandConfig.Dahood.Main.Automask == nil) and false or SocietyStandConfig.Dahood.Main.Automask
 
@@ -2777,6 +2776,8 @@ end
 wrapBaseCommandWithAutoReset("summon")
 wrapBaseCommandWithAutoReset("stop")
 wrapBaseCommandWithAutoReset("vanish")
+
+
 
 if DahoodMainConfig.Automask == true and not amaskActive then
     task.spawn(function()
