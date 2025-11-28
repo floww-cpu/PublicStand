@@ -1,16 +1,17 @@
 local globalEnv = getgenv()
-globalEnv.SocietyStand = globalEnv.SocietyStand or {}
+globalEnv.SocietyStandConfig = globalEnv.SocietyStandConfig or {}
 
-local SocietyStandConfig = globalEnv.SocietyStand
+local SocietyStandConfig = globalEnv.SocietyStandConfig
 SocietyStandConfig.Dahood = SocietyStandConfig.Dahood or {}
 SocietyStandConfig.Dahood.Main = SocietyStandConfig.Dahood.Main or {}
+
+if SocietyStandConfig.Dahood.Main.AntiStomp == nil then
+    SocietyStandConfig.Dahood.Main.AntiStomp = false
+end
 
 if SocietyStandConfig.Dahood.Main.Automask == nil then
     SocietyStandConfig.Dahood.Main.Automask = false
 end
-
-local DahoodConfig = SocietyStandConfig.Dahood
-local DahoodMainConfig = DahoodConfig.Main
 
 local requiredFields = {"Stand", "Create", "Stop", "sendChat", "getPlayer", "ownerPlayer", "Notify", "ForceChat"}
 local function isAPIReady()
@@ -560,10 +561,19 @@ local function buyLMG(ammoPurchases)
         end
     end
     local purchases = ammoPurchases or 6
+    local ammoBought = 0
     for _ = 1, purchases do
-        buyShopItem(LMG_AMMO_ITEM, nil, 1)
+        local success, message = buyShopItem(LMG_AMMO_ITEM, nil, 1)
+        if success then
+            ammoBought = ammoBought + 1
+        else
+            if message and message:find("incomplete") then
+                break
+            end
+        end
+        task.wait(0.1)
     end
-    return true, hasGun and "ammo_only" or "full_purchase"
+    return true, hasGun and ("ammo_only_" .. ammoBought) or ("full_purchase_" .. ammoBought)
 end
 
 local MainEvent = ReplicatedStorage:WaitForChild("MainEvent", 5)
@@ -1977,6 +1987,12 @@ local function ensureMaskToolAvailable()
         return nil, "fireclickdetector unavailable"
     end
     
+    local originalFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
+    Stand.Following = false
+    Stand.ManualControl = true
+    API.currentFollowTarget = nil
+    
     local originalCFrame = hrp.CFrame
     local originalCameraSubject = Workspace.CurrentCamera.CameraSubject
     
@@ -2035,6 +2051,10 @@ local function ensureMaskToolAvailable()
     pcall(function()
         hrp.CFrame = originalCFrame
     end)
+    
+    Stand.Following = originalFollowing
+    Stand.ManualControl = false
+    API.currentFollowTarget = originalTarget
     
     local finalTool = getMaskTool()
     if finalTool then
@@ -2099,7 +2119,12 @@ local amaskBuying = false
 
 API.Create("amask", function(args)
     if amaskActive then
-        API.sendChat("AMask already active!")
+        amaskActive = false
+        if amaskConnection then
+            amaskConnection:Disconnect()
+            amaskConnection = nil
+        end
+        API.sendChat("AMask deactivated")
         return
     end
     
@@ -2165,6 +2190,8 @@ API.Create("amask", function(args)
             pcall(checkAndEquipMask)
         end
     end)
+    
+    API.sendChat("AMask activated")
 end)
 
 API.Create("unamask", function(args)
@@ -2823,6 +2850,21 @@ if DahoodMainConfig.Automask == true and not amaskActive then
         end)
     end)
 end
+
+RunService.Stepped:Connect(function()
+    if DahoodMainConfig.AntiStomp == true then
+        pcall(function()
+            local localDead = isDead(LocalPlayer)
+            local localKO = KO(LocalPlayer)
+            
+            if localDead == false and localKO and localKO.Value == false and getLocalHumanoid() and getLocalHumanoid().Health <= 80 then
+                if MainEvent then
+                    game.Players.LocalPlayer.Character.Humanoid.Health = 0
+                end
+            end
+        end)
+    end
+end)
 
 API.Create("stando", function(args)
     API.ForceChat("This is not stando mwuah 😙")
