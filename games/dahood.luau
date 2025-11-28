@@ -653,6 +653,46 @@ local function startGunStrafe(target, config)
     local rotationSpeed = config.rotationSpeed or STRAFE_DEFAULTS.rotationSpeed
     local angle = 0
     local connection
+    
+    -- Immediately position stand near target (no delay)
+    local myHRP = getLocalHRP()
+    local targetRoot = getRoot(target)
+    local targetHumanoid = getHumanoid(target)
+    if myHRP and targetRoot and targetHumanoid then
+        pcall(function()
+            local predictedPosition = targetRoot.Position
+            local success, prediction = pcall(function()
+                return targetHumanoid.MoveDirection * AutoPredic * targetHumanoid.WalkSpeed
+            end)
+            if success and prediction then
+                predictedPosition += prediction
+            end
+            
+            local offsetY
+            if mode == "Under" then
+                if targetHumanoid.FloorMaterial == Enum.Material.Air then
+                    offsetY = -height - 8
+                else
+                    offsetY = -height - 2
+                end
+            else
+                offsetY = height
+            end
+            
+            local orbitCenter = predictedPosition + Vector3.new(0, offsetY, 0)
+            local orbitCFrame = CFrame.new(orbitCenter) * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, radius)
+            myHRP.CFrame = orbitCFrame
+            local humanoid = getLocalHumanoid()
+            if humanoid then
+                for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+                    local animationId = track.Animation and track.Animation.AnimationId or ""
+                    if animationId:find("3541114300") or animationId:find("3084858603") or animationId:find("13850634687") then
+                        track:Stop()
+                    end
+                end
+            end
+        end)
+    end
 
     connection = RunService.Heartbeat:Connect(function(dt)
         local myHRP = getLocalHRP()
@@ -2082,8 +2122,48 @@ local gautokillState = {
     originalTarget = nil,
     stopStrafe = nil,
     lastStomp = 0,
-    ammoRequested = false
+    ammoRequested = false,
+    holdConnection = nil,
+    lastKnownPosition = nil
 }
+
+local function stopGautokillHold()
+    if gautokillState.holdConnection then
+        gautokillState.holdConnection:Disconnect()
+        gautokillState.holdConnection = nil
+    end
+end
+
+local function ensureGautokillHold(anchorPosition)
+    if anchorPosition then
+        gautokillState.lastKnownPosition = anchorPosition
+    end
+    if gautokillState.holdConnection or not gautokillState.lastKnownPosition then
+        return
+    end
+
+    local angle = math.random() * math.pi * 2
+    gautokillState.holdConnection = RunService.Heartbeat:Connect(function(dt)
+        if not gautokillState.active then
+            stopGautokillHold()
+            return
+        end
+
+        local myHRP = getLocalHRP()
+        local anchor = gautokillState.lastKnownPosition
+        if not myHRP or not anchor then
+            return
+        end
+
+        angle = (angle + ((2 * math.pi) / 0.35) * dt) % (math.pi * 2)
+        local orbitCenter = anchor + Vector3.new(0, 250, 0)
+        local orbitCFrame = CFrame.new(orbitCenter) * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, 150)
+
+        pcall(function()
+            myHRP.CFrame = orbitCFrame
+        end)
+    end)
+end
 
 local function restoreStandState(state)
     if state.originalFollowing ~= nil then
@@ -2120,24 +2200,28 @@ local function stopAutokill(reason)
 end
 
 local function stopGautokill(reason)
+    gautokillState.active = false
+    
     if gautokillState.connection then
         gautokillState.connection:Disconnect()
         gautokillState.connection = nil
     end
+    if gautokillState.holdConnection then
+        gautokillState.holdConnection:Disconnect()
+        gautokillState.holdConnection = nil
+    end
     if gautokillState.stopStrafe then
-        gautokillState.stopStrafe()
+        pcall(function()
+            gautokillState.stopStrafe()
+        end)
         gautokillState.stopStrafe = nil
     end
-    if not gautokillState.active then
-        gautokillState.target = nil
-        gautokillState.lastStomp = 0
-        gautokillState.ammoRequested = false
-        return
-    end
-    gautokillState.active = false
+    
     gautokillState.target = nil
     gautokillState.lastStomp = 0
     gautokillState.ammoRequested = false
+    gautokillState.lastKnownPosition = nil
+    
     restoreStandState(gautokillState)
     unequipAllTools()
     local humanoid = getLocalHumanoid()
@@ -2178,7 +2262,6 @@ local function startAutokillLoop(target)
 
             local targetKO = KO(trackedTarget)
             if not targetKO then
-                stopAutokill("Target invalid, AutoKill stopped.")
                 return
             end
 
@@ -2217,14 +2300,6 @@ local function startAutokillLoop(target)
                             autokillState.lastStomp = tick()
                         end
                     end
-                else
-                    local ownerRoot = getRoot(API.ownerPlayer)
-                    local myHRP = getLocalHRP()
-                    if ownerRoot and myHRP then
-                        pcall(function()
-                            myHRP.CFrame = ownerRoot.CFrame * CFrame.new(0, 2, 3)
-                        end)
-                    end
                 end
             end
         end)
@@ -2245,6 +2320,8 @@ local function startGautokillLoop(target)
     gautokillState.active = true
     gautokillState.lastStomp = 0
     gautokillState.ammoRequested = false
+    gautokillState.lastKnownPosition = nil
+    stopGautokillHold()
 
     gautokillState.connection = RunService.Heartbeat:Connect(function()
         if not gautokillState.active then
@@ -2260,12 +2337,19 @@ local function startGautokillLoop(target)
 
             local targetCharacter = trackedTarget.Character
             if not targetCharacter then
+                stopGautokillHold()
+                if gautokillState.stopStrafe then
+                    gautokillState.stopStrafe()
+                    gautokillState.stopStrafe = nil
+                end
+                if gautokillState.lastKnownPosition then
+                    ensureGautokillHold(gautokillState.lastKnownPosition)
+                end
                 return
             end
 
             local targetKO = KO(trackedTarget)
             if not targetKO then
-                stopGautokill("Target invalid, GAutoKill stopped.")
                 return
             end
 
@@ -2278,6 +2362,7 @@ local function startGautokillLoop(target)
             if targetKO.Value == false and not isDead(trackedTarget) then
                 gautokillState.lastStomp = 0
                 gautokillState.ammoRequested = false
+                stopGautokillHold()
                 if not gautokillState.stopStrafe then
                     gautokillState.stopStrafe = startGunStrafe(trackedTarget, {mode = "Sky", height = 8, radius = 10})
                 end
@@ -2306,6 +2391,7 @@ local function startGautokillLoop(target)
                 end
 
                 if not isDead(trackedTarget) then
+                    stopGautokillHold()
                     if tick() - gautokillState.lastStomp > 0.75 then
                         if stompTarget(trackedTarget) then
                             gautokillState.lastStomp = tick()
@@ -2321,13 +2407,10 @@ local function startGautokillLoop(target)
                             end
                         end)
                     end
-
-                    local ownerRoot = getRoot(API.ownerPlayer)
-                    local myHRP = getLocalHRP()
-                    if ownerRoot and myHRP then
-                        pcall(function()
-                            myHRP.CFrame = ownerRoot.CFrame * CFrame.new(0, 2, 3)
-                        end)
+                    
+                    local targetRoot = getRoot(trackedTarget)
+                    if targetRoot then
+                        ensureGautokillHold(targetRoot.Position)
                     end
                 end
             end
