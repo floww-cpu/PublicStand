@@ -2852,6 +2852,7 @@ local RS = game:GetService("RunService")
 local pl = game.Players.LocalPlayer
 
 RS.Stepped:Connect(function()
+    local DahoodMainConfig = getgenv().SocietyStandConfig.Dahood.Main 
     if DahoodMainConfig and DahoodMainConfig.AntiStomp then
         pcall(function()
             local hum = getLocalHumanoid()
@@ -2863,6 +2864,7 @@ RS.Stepped:Connect(function()
         end)
     end
 end)
+
 
 API.Create("stando", function(args)
     API.ForceChat("This is not stando mwuah 😙")
