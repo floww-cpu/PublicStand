@@ -495,56 +495,8 @@ local function getClickDetectorFunc()
 end
 
 local function buyShopItem(shopItemName, expectedToolName, attempts)
-    local shopFolder = getShopFolder()
-    if not shopFolder then
-        return false, "Shop folder missing"
-    end
-    local shopItem = shopFolder:FindFirstChild(shopItemName)
-    if not shopItem then
-        return false, "Shop item '" .. shopItemName .. "' not found"
-    end
-    local head = shopItem:FindFirstChild("Head")
-    local detector = shopItem:FindFirstChild("ClickDetector")
-    if not head or not detector then
-        return false, "Shop item incomplete"
-    end
-    local hrp = getLocalHRP()
-    if not hrp then
-        return false, "HumanoidRootPart missing"
-    end
-    local originalCFrame
-    pcall(function()
-        originalCFrame = hrp.CFrame
-        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
-    end)
-    task.wait(0.15)
-    local clickFunction = getClickDetectorFunc()
-    if not clickFunction then
-        pcall(function()
-            if originalCFrame then
-                hrp.CFrame = originalCFrame
-            end
-        end)
-        return false, "fireclickdetector unavailable"
-    end
-    local success = false
-    local attemptsCount = attempts or 5
-    for _ = 1, attemptsCount do
-        pcall(function()
-            clickFunction(detector)
-        end)
-        task.wait(0.2)
-        if not expectedToolName or hasAnyTool(expectedToolName) then
-            success = true
-            break
-        end
-    end
-    pcall(function()
-        if originalCFrame then
-            hrp.CFrame = originalCFrame
-        end
-    end)
-    return success, success and "Purchased" or "Purchase failed"
+    -- Use the enhanced manual control buying function
+    return buyManualControl(shopItemName, expectedToolName, attempts)
 end
 
 local function buyLMG(ammoPurchases)
@@ -1062,136 +1014,6 @@ API.Create("stomp", function(args)
     end)
 end)
 
-API.Create("revenge", function(args)
-    stopAutokill("Revenge command activated - stopping AutoKill")
-    stopGautokill("Revenge command activated - stopping GAutoKill")
-
-    local owner = API.ownerPlayer
-    if (not lastKiller or lastKiller.Parent ~= Players) and owner and owner.Character then
-        local stomper = detectStomper(owner.Character)
-        if stomper then
-            lastKiller = stomper
-            print(string.format("[Revenge Command] Using stomper %s as revenge target", stomper.Name))
-        end
-    end
-
-    if not lastKiller or lastKiller.Parent ~= Players then
-        API.sendChat("No revenge target found (nobody has killed/stomped the owner yet)")
-        return
-    end
-    
-    local target = lastKiller
-    if not target.Character then
-        API.sendChat("Revenge target has no character!")
-        return
-    end
-    
-    local targetKO = KO(target)
-    if not targetKO then
-        API.sendChat("Revenge target invalid!")
-        return
-    end
-    
-    API.sendChat("Taking revenge on " .. target.Name .. "!")
-    
-    local originalFollowing = Stand.Following
-    local originalTarget = API.currentFollowTarget
-    
-    Stand.Attacking = false
-    Stand.Following = false
-    API.currentFollowTarget = nil
-    
-    task.spawn(function()
-        local standCharacter = getLocalCharacter()
-        if not standCharacter then
-            API.sendChat("Stand character missing - cannot execute revenge")
-            return
-        end
-        
-        if targetKO.Value == false then
-            if not standCharacter:FindFirstChild("Combat") then
-                local backpack = LocalPlayer:FindFirstChild("Backpack")
-                if backpack and backpack:FindFirstChild("Combat") then
-                    backpack:FindFirstChild("Combat").Parent = standCharacter
-                end
-            end
-            
-            local knockStartTime = tick()
-            local timeout = 30
-            
-            repeat
-                RunService.Stepped:Wait()
-                
-                if not target.Character or isDead(target) then
-                    break
-                end
-                
-                if targetKO.Value == false then
-                    Equip("Combat")
-                    if MainEvent then
-                        MainEvent:FireServer("ChargeButton")
-                    end
-                    TargetMelee(target)
-                else
-                    break
-                end
-                
-                if tick() - knockStartTime > timeout then
-                    API.sendChat("Revenge knock timeout!")
-                    break
-                end
-                
-            until targetKO.Value == true or not target.Character or isDead(target)
-            
-            local attackingValue = Attacking(LocalPlayer)
-            if attackingValue then
-                local waitStart = tick()
-                while attackingValue.Value == true and tick() - waitStart < 5 do
-                    task.wait(0.1)
-                end
-            end
-        end
-        
-        if targetKO.Value == true and not isDead(target) then
-            local targetTorso = getTorso(target)
-            local myHRP = getLocalHRP()
-            
-            if targetTorso and myHRP then
-                pcall(function()
-                    myHRP.CFrame = CFrame.new(targetTorso.Position + Vector3.new(0, 5, 0))
-                    task.wait(0.1)
-                    if MainEvent then
-                        MainEvent:FireServer("Stomp")
-                    end
-                end)
-            end
-            
-            task.wait(0.5)
-            
-            if isDead(target) then
-                API.sendChat("Revenge complete! " .. target.Name .. " has been eliminated!")
-            else
-                API.sendChat("Revenge stomped " .. target.Name)
-            end
-        else
-            API.sendChat("Revenge failed to knock " .. target.Name)
-        end
-        
-        local localHumanoid = getLocalHumanoid()
-        if localHumanoid then
-            Workspace.Camera.CameraSubject = localHumanoid
-        end
-        
-        Stand.Following = originalFollowing
-        API.currentFollowTarget = originalTarget
-        
-        if API.Summon then
-            task.wait(0.5)
-            API.Summon()
-        end
-    end)
-end)
-
 API.Create("gun", function(args)
     local alreadyOwned = hasTool(GUN_NAME)
     if alreadyOwned then
@@ -1694,6 +1516,18 @@ API.Create("gbring", function(args)
 end)
 
 API.Create("revenge", function(args)
+    local ownerPlayer = API.ownerPlayer
+    if ownerPlayer and ownerPlayer.Character then
+        local bodyEffects = ownerPlayer.Character:FindFirstChild("BodyEffects")
+        if bodyEffects then
+            local lastDamager = bodyEffects:FindFirstChild("LastDamager")
+            if lastDamager and lastDamager.Value and lastDamager.Value:IsA("Player") then
+                lastKiller = lastDamager.Value
+                print("[Revenge] Using LastDamager: " .. lastKiller.Name)
+            end
+        end
+    end
+    
     if not lastKiller or not lastKiller.Character then
         API.sendChat("No one to get revenge on!")
         return
@@ -1887,8 +1721,234 @@ API.Create("drop", function(args)
         return
     end
     
-    MainEvent:FireServer("Grabbing")
-    API.sendChat("Dropped!")
+    local targetName = table.concat(args, " ")
+    
+    if targetName == "" then
+        -- Normal drop
+        MainEvent:FireServer("Grabbing")
+        API.sendChat("Dropped!")
+        return
+    end
+    
+    -- Check if it's a location
+    local locations = {
+        ["bank"] = CFrame.new(-445, 39, -284),
+        ["Roof"] = CFrame.new(-328, 80, -298),
+        ["club"] = CFrame.new(-264, -6, -379),
+        ["casino"] = CFrame.new(-1001, 80, -230),
+        ["ufo"] = CFrame.new(69, 139, -688),
+        ["mil"] = CFrame.new(36, 50, -832),
+        ["school"] = CFrame.new(-586, 68, 326),
+        ["shop1"] = CFrame.new(-335.141, 23, -298),
+        ["shop2"] = CFrame.new(298, 49, -615),
+        ["rev"] = CFrame.new(-638, 21, -126),
+        ["db"] = CFrame.new(25, 25, -834),
+        ["pool"] = CFrame.new(-846, 51, -300),
+        ["armor"] = CFrame.new(408, 48, -43),
+        ["subway"] = CFrame.new(646, 47, -68),
+        ["subway1"] = CFrame.new(-371, -21, 113),
+        ["sewer"] = CFrame.new(172, -41, 156),
+        ["wheel"] = CFrame.new(159, 157, -722),
+        ["safe1"] = CFrame.new(0, 15, 213),
+        ["safe2"] = CFrame.new(-116, -58, 146),
+        ["safe3"] = CFrame.new(-547, 173, 0),
+        ["safe4"] = CFrame.new(-1100, 110, -90),
+        ["safe5"] = CFrame.new(-160, 70, 220),
+        ["Basketball"] = CFrame.new(-908, 21, -500),
+        ["boxing"] = CFrame.new(-234, 22, -1119),
+        ["bull"] = CFrame.new(-660, 23, -122)
+    }
+    
+    local locationCF = locations[targetName:lower()]
+    if locationCF then
+        -- Drop at location
+        local hrp = getLocalHRP()
+        if hrp then
+            pcall(function()
+                hrp.CFrame = locationCF
+                task.wait(0.2)
+                MainEvent:FireServer("Grabbing")
+                API.sendChat("Dropped at " .. targetName .. "!")
+            end)
+        end
+        return
+    end
+    
+    -- Check if it's a target player
+    local target = resolveTargetFromArgs(args)
+    if target and target.Character then
+        local targetRoot = getRoot(target)
+        if targetRoot then
+            local hrp = getLocalHRP()
+            if hrp then
+                pcall(function()
+                    hrp.CFrame = targetRoot.CFrame * CFrame.new(0, 3, 0)
+                    task.wait(0.2)
+                    MainEvent:FireServer("Grabbing")
+                    API.sendChat("Dropped on " .. target.Name .. "!")
+                end)
+            end
+        end
+        return
+    end
+    
+    API.sendChat("Invalid location or target!")
+end)
+
+API.Create("throw", function(args)
+    if not MainEvent then
+        API.sendChat("MainEvent not found!")
+        return
+    end
+    
+    MainEvent:FireServer("Grabbing", true)
+    API.sendChat("Thrown!")
+end)
+
+-- Goto command with cart functionality
+local function getFoodsCart()
+    local shopFolder = getShopFolder()
+    if not shopFolder then
+        return nil
+    end
+    return shopFolder:FindFirstChild("[FoodsCart] - $16")
+end
+
+local function rideCart(targetCFrame)
+    local hrp = getLocalHRP()
+    local humanoid = getLocalHumanoid()
+    if not hrp or not humanoid then
+        return false
+    end
+    
+    local cart = getFoodsCart()
+    if not cart then
+        return false
+    end
+    
+    local cartHead = cart:FindFirstChild("Head")
+    local cartDetector = cart:FindFirstChild("ClickDetector")
+    
+    if not cartHead or not cartDetector then
+        return false
+    end
+    
+    -- Enable manual control for getting cart
+    Stand.ManualControl = true
+    
+    -- Move to cart and buy it
+    local originalCFrame = hrp.CFrame
+    local clickFunction = getClickDetectorFunc()
+    
+    if clickFunction then
+        pcall(function()
+            hrp.CFrame = cartHead.CFrame * CFrame.new(0, -5, 0)
+            task.wait(0.1)
+            clickFunction(cartDetector)
+        end)
+    end
+    
+    -- Wait for cart to appear in workspace
+    local vehiclesFolder = Workspace:FindFirstChild("Vehicles")
+    local cartVehicle = nil
+    
+    local startTime = tick()
+    while tick() - startTime < 10 do
+        if vehiclesFolder then
+            cartVehicle = vehiclesFolder:FindFirstChild(LocalPlayer.Name .. "BIKE")
+            if cartVehicle then
+                break
+            end
+        end
+        task.wait(0.1)
+    end
+    
+    if not cartVehicle then
+        Stand.ManualControl = false
+        return false
+    end
+    
+    -- Sit in cart
+    local vehicleSeat = cartVehicle:FindFirstChild("VehicleSeat") or cartVehicle:FindFirstChildWhichIsA("VehicleSeat")
+    if vehicleSeat then
+        pcall(function()
+            firetouchinterest(hrp, vehicleSeat, 0)
+        end)
+    end
+    
+    task.wait(0.2)
+    
+    if targetCFrame then
+        pcall(function()
+            hrp.CFrame = targetCFrame
+            task.wait(0.1)
+        end)
+    end
+    
+    Stand.ManualControl = false
+    return true
+end
+
+API.Create("goto", function(args)
+    local targetName = table.concat(args, " ")
+    
+    if targetName == "" then
+        API.sendChat("Usage: goto [player/location]")
+        return
+    end
+    
+    local locations = {
+        ["bank"] = CFrame.new(-445, 39, -284),
+        ["Roof"] = CFrame.new(-328, 80, -298),
+        ["club"] = CFrame.new(-264, -6, -379),
+        ["casino"] = CFrame.new(-1001, 80, -230),
+        ["ufo"] = CFrame.new(69, 139, -688),
+        ["mil"] = CFrame.new(36, 50, -832),
+        ["school"] = CFrame.new(-586, 68, 326),
+        ["shop1"] = CFrame.new(-335.141, 23, -298),
+        ["shop2"] = CFrame.new(298, 49, -615),
+        ["rev"] = CFrame.new(-638, 21, -126),
+        ["db"] = CFrame.new(25, 25, -834),
+        ["pool"] = CFrame.new(-846, 51, -300),
+        ["armor"] = CFrame.new(408, 48, -43),
+        ["subway"] = CFrame.new(646, 47, -68),
+        ["subway1"] = CFrame.new(-371, -21, 113),
+        ["sewer"] = CFrame.new(172, -41, 156),
+        ["wheel"] = CFrame.new(159, 157, -722),
+        ["safe1"] = CFrame.new(0, 15, 213),
+        ["safe2"] = CFrame.new(-116, -58, 146),
+        ["safe3"] = CFrame.new(-547, 173, 0),
+        ["safe4"] = CFrame.new(-1100, 110, -90),
+        ["safe5"] = CFrame.new(-160, 70, 220),
+        ["Basketball"] = CFrame.new(-908, 21, -500),
+        ["boxing"] = CFrame.new(-234, 22, -1119),
+        ["bull"] = CFrame.new(-660, 23, -122)
+    }
+    
+    local locationCF = locations[targetName:lower()]
+    if locationCF then
+        if rideCart(locationCF) then
+
+        else
+            API.sendChat("Failed to get cart!")
+        end
+        return
+    end
+    
+    local target = resolveTargetFromArgs(args)
+    if target and target.Character then
+        local targetRoot = getRoot(target)
+        if targetRoot then
+            if rideCart(targetRoot.CFrame * CFrame.new(0, 5, 0)) then
+                API.sendChat("Brought to " .. target.Name .. "!")
+            else
+                API.sendChat("Failed to get cart!")
+            end
+            return
+        end
+    end
+    
+    API.sendChat("Invalid location or target!")
 end)
 
 API.Create("wallet", function(args)
@@ -1949,114 +2009,109 @@ local function getMaskTool()
     return nil
 end
 
+-- Enhanced buying function based on otherstands/dahood./stando.luau
+local function buyManualControl(shopItemName, expectedToolName, attempts)
+    attempts = attempts or 8
+    local character = getLocalCharacter()
+    local humanoid = getLocalHumanoid()
+    local hrp = getLocalHRP()
+
+    if not character or not humanoid or not hrp then
+        return false, "Missing character/humanoid/hrp"
+    end
+
+    local shopFolder = getShopFolder()
+    if not shopFolder then
+        return false, "Shop folder missing"
+    end
+
+    local shopItem = shopFolder:FindFirstChild(shopItemName)
+    if not shopItem then
+        return false, "Shop item '" .. shopItemName .. "' not found"
+    end
+
+    local head = shopItem:FindFirstChild("Head")
+    local detector = shopItem:FindFirstChild("ClickDetector")
+    if not head or not detector then
+        return false, "Shop item incomplete"
+    end
+
+    local clickFunction = getClickDetectorFunc()
+    if not clickFunction then
+        return false, "fireclickdetector unavailable"
+    end
+
+    local originalCFrame = hrp.CFrame
+    local originalCameraSubject = Workspace.CurrentCamera.CameraSubject
+
+    -- Enable manual control mode
+    Stand.ManualControl = true
+
+    pcall(function()
+        -- Set camera to humanoid for manual control
+        Workspace.CurrentCamera.CameraSubject = humanoid
+    end)
+
+    local success = false
+
+    for attempt = 1, attempts do
+        pcall(function()
+            -- Move to shop item
+            hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
+        end)
+
+        task.wait(0.1)
+
+        pcall(function()
+            clickFunction(detector)
+        end)
+
+        task.wait(0.2)
+
+        -- Check if we got the item
+        if not expectedToolName or hasTool(expectedToolName) then
+            success = true
+            break
+        end
+    end
+
+    -- Restore original state
+    pcall(function()
+        hrp.CFrame = originalCFrame
+        if originalCameraSubject then
+            Workspace.CurrentCamera.CameraSubject = originalCameraSubject
+        end
+    end)
+
+    Stand.ManualControl = false
+    return success, success and "Purchased" or "Purchase failed"
+end
+
 local function ensureMaskToolAvailable()
     local existing = getMaskTool()
     if existing then
         return existing
     end
 
-    local shopFolder = getShopFolder()
-    if not shopFolder then
-        return nil, "Shop folder missing"
-    end
-    
-    local shopItem = shopFolder:FindFirstChild(MASK_ITEM_NAME)
-    if not shopItem then
-        return nil, "Shop item not found"
-    end
-    
-    local head = shopItem:FindFirstChild("Head")
-    local detector = shopItem:FindFirstChild("ClickDetector")
-    if not head or not detector then
-        return nil, "Shop item incomplete"
-    end
-    
-    local hrp = getLocalHRP()
-    local humanoid = getLocalHumanoid()
-    if not hrp or not humanoid then
-        return nil, "HumanoidRootPart or Humanoid missing"
-    end
-    
-    local clickFunction = getClickDetectorFunc()
-    if not clickFunction then
-        return nil, "fireclickdetector unavailable"
-    end
-    
-    local originalFollowing = Stand.Following
-    local originalTarget = API.currentFollowTarget
-    Stand.Following = false
-    Stand.ManualControl = true
-    API.currentFollowTarget = nil
-    
-    local originalCFrame = hrp.CFrame
-    local originalCameraSubject = Workspace.CurrentCamera.CameraSubject
-    
-    pcall(function()
-        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
-    end)
-    
-    task.wait(0.1)
-    
-    local startTime = tick()
-    local timeout = 15 
-    local success = false
-    
-    repeat
-        task.wait()
-        pcall(function()
-            local character = getLocalCharacter()
-            if character then
-                for _, part in pairs(character:GetDescendants()) do
-                    if part:IsA("BasePart") or part:IsA("MeshPart") or part:IsA("Part") then
-                        if part.CanCollide == true then
-                            part.CanCollide = false
-                        end
-                        part.Velocity = Vector3.new(0, 0, 0)
-                    end
-                end
-            end
-            
-            pcall(function()
-                Workspace.CurrentCamera.CameraSubject = head
-            end)
-            
-            hrp.CFrame = head.CFrame * CFrame.new(0, -5, 0)
-            
-            clickFunction(detector)
-        end)
-        
-        if getMaskTool() then
-            success = true
-            break
+    -- Try all mask types with manual control
+    local maskShopItems = {
+        {name = "[Hockey Mask] - $64", tool = "[Mask]"},
+        {name = "[Surgeon Mask] - $27", tool = "[Mask]"},
+        {name = "[Skull Mask] - $64", tool = "[Mask]"},
+        {name = "[Paintball Mask] - $64", tool = "[Mask]"},
+        {name = "[Pumpkin Mask] - $64", tool = "[Mask]"},
+        {name = "[Ninja Mask] - $64", tool = "[Mask]"},
+        {name = "[Riot Mask] - $64", tool = "[Mask]"}
+    }
+
+    for _, maskItem in ipairs(maskShopItems) do
+        local success, message = buyManualControl(maskItem.name, maskItem.tool, 3)
+        if success then
+            return getMaskTool()
         end
-        
-        if (tick() - startTime) >= timeout then
-            break
-        end
-    until getMaskTool()
-    
-    pcall(function()
-        if originalCameraSubject then
-            Workspace.CurrentCamera.CameraSubject = originalCameraSubject
-        elseif humanoid then
-            Workspace.CurrentCamera.CameraSubject = humanoid
-        end
-    end)
-    
-    pcall(function()
-        hrp.CFrame = originalCFrame
-    end)
-    
-    Stand.Following = originalFollowing
-    Stand.ManualControl = false
-    API.currentFollowTarget = originalTarget
-    
-    local finalTool = getMaskTool()
-    if finalTool then
-        return finalTool
-    else
-        return nil, "Purchase timeout - mask not received"
     end
+
+    return nil, "Failed to buy any mask"
 end
 
 local function equipMaskTool(maskTool, character, humanoid)
@@ -2085,14 +2140,9 @@ local function equipMaskTool(maskTool, character, humanoid)
     return false
 end
 
+local maskToggleState = false
+
 API.Create("mask", function(args)
-    
-    local maskTool, errorMsg = ensureMaskToolAvailable()
-    if not maskTool then
-        API.sendChat("Failed to buy mask" .. (errorMsg and ": " .. errorMsg or "!"))
-        return
-    end
-    
     local character = getLocalCharacter()
     local humanoid = getLocalHumanoid()
     if not character or not humanoid then
@@ -2100,11 +2150,43 @@ API.Create("mask", function(args)
         return
     end
     
-    local equipped = equipMaskTool(maskTool, character, humanoid)
-    if equipped then
-
+    local bodyEffects = character:FindFirstChild("BodyEffects")
+    local currentMask = bodyEffects and bodyEffects:FindFirstChild("Mask")
+    local hasMaskEquipped = currentMask and currentMask.Value ~= nil
+    
+    if hasMaskEquipped then
+        -- Unequip mask
+        humanoid:UnequipTools()
+        API.sendChat("Mask unequipped!")
+        maskToggleState = false
     else
-        API.sendChat("Failed to equip mask!")
+        -- Try to equip from inventory first
+        local maskTool = getMaskTool()
+        if maskTool then
+            -- Equip existing mask
+            local equipped = equipMaskTool(maskTool, character, humanoid)
+            if equipped then
+                API.sendChat("Mask equipped from inventory!")
+                maskToggleState = true
+            else
+                API.sendChat("Failed to equip mask!")
+            end
+        else
+            -- Buy and equip new mask
+            local maskTool, errorMsg = ensureMaskToolAvailable()
+            if not maskTool then
+                API.sendChat("Failed to buy mask" .. (errorMsg and ": " .. errorMsg or "!"))
+                return
+            end
+            
+            local equipped = equipMaskTool(maskTool, character, humanoid)
+            if equipped then
+                API.sendChat("Mask bought and equipped!")
+                maskToggleState = true
+            else
+                API.sendChat("Failed to equip mask!")
+            end
+        end
     end
 end)
 
@@ -2814,17 +2896,30 @@ if DahoodMainConfig.Automask == true and not amaskActive then
                     return
                 end
                 
+                -- Use manual control mode when vanish is active
+                local wasVanished = Stand.Vanish
+                if wasVanished then
+                    Stand.ManualControl = true
+                end
+                
                 local maskTool, errorMsg = ensureMaskToolAvailable()
                 if not maskTool then
                     if errorMsg then
                         warn("[AMask] Failed to buy mask: " .. tostring(errorMsg))
                     end
                     amaskBuying = false
+                    if wasVanished then
+                        Stand.ManualControl = false
+                    end
                     return
                 end
                 
                 if equipMaskTool(maskTool, character, humanoid) then
                     print("[AMask] Auto-equipped mask")
+                end
+                
+                if wasVanished then
+                    Stand.ManualControl = false
                 end
                 
                 amaskBuying = false
