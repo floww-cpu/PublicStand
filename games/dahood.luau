@@ -2853,14 +2853,14 @@ local pl = game.Players.LocalPlayer
 
 RS.Stepped:Connect(function()
     local cfg = getgenv().SocietyStandConfig.Dahood.Main
-    if cfg and cfg.AntiStomp then
+    if cfg and cfg.AntiStomp and ok and mainEvent then
         pcall(function()
             local hum = getLocalHumanoid()
             local K = KO(pl)
             local isKO = K and typeof(K.Value) == "boolean" and K.Value
 
             if not isDead(pl) and not isKO and hum and hum.Health < 60 then
-                l_MainEvent_0:FireServer("ResetNew")
+                mainEvent:FireServer("ResetNew")
                 getHumanoid(pl):ChangeState("Dead")
             end
         end)
