@@ -1,4 +1,3 @@
--- Config
 local globalEnv = getgenv()
 globalEnv.SocietyStand = globalEnv.SocietyStand or {}
 
@@ -7,13 +6,13 @@ SocietyStandConfig.Dahood = SocietyStandConfig.Dahood or {}
 SocietyStandConfig.Dahood.Main = SocietyStandConfig.Dahood.Main or {}
 
 if SocietyStandConfig.Dahood.Main.Automask == nil then
-    SocietyStandConfig.Dahood.Main.Automask = true
+    SocietyStandConfig.Dahood.Main.Automask = false
 end
 
 local DahoodConfig = SocietyStandConfig.Dahood
 local DahoodMainConfig = DahoodConfig.Main
 
-local requiredFields = {"Stand", "Create", "Stop", "sendChat", "getPlayer", "ownerPlayer", "Notify"}
+local requiredFields = {"Stand", "Create", "Stop", "sendChat", "getPlayer", "ownerPlayer", "Notify", "ForceChat"}
 local function isAPIReady()
     local api = getgenv().SocietyStandAPI
     if not api then return false end
@@ -40,13 +39,11 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local Stand = API.Stand
 
--- Ensure LocalPlayer is available
 if not LocalPlayer then
     Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
     LocalPlayer = Players.LocalPlayer
 end
 
--- Install CHECKER_1 anticheat bypass
 local function installCheckerBypass()
     if getgenv().SocietyStandDaHoodCheckerBypass then
         return
@@ -81,7 +78,6 @@ local function installCheckerBypass()
     end)
 
     getgenv().SocietyStandDaHoodCheckerBypass = true
-    print("[Da Hood Config] CHECKER_1 anticheat bypass active")
 end
 
 local bypassSuccess, bypassError = pcall(installCheckerBypass)
@@ -89,7 +85,6 @@ if not bypassSuccess and bypassError then
     warn("[Da Hood Config] Failed to install CHECKER_1 bypass:", bypassError)
 end
 
--- Disable detected commands that use BodyVelocity/BodyGyro
 local DETECTED_FUNCTIONS = {
     bodygyro = true,
     bodyvelocity = true,
@@ -125,9 +120,8 @@ for _, cmdName in ipairs({"fling", "punch", "slam", "roof", "lift"}) do
     disableDetectedCommand(cmdName)
 end
 
-print("[Da Hood Config] Anticheat protection: Disabled commands that use BodyVelocity/BodyGyro")
+print("[Da Hood Config] Anticheat protection Enabled")
 
--- Track who kills/stomps the owner for revenge
 local function markKillerFromBodyEffects(bodyEffects, reason)
     if not bodyEffects then return end
     local creatorValue = bodyEffects:FindFirstChild("Creator")
@@ -281,7 +275,6 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- Helper functions
 local function getLocalPlayer()
     return Players.LocalPlayer
 end
@@ -573,15 +566,12 @@ local function buyLMG(ammoPurchases)
     return true, hasGun and "ammo_only" or "full_purchase"
 end
 
--- MainEvent reference
 local MainEvent = ReplicatedStorage:WaitForChild("MainEvent", 5)
 
 local ZERO_VECTOR = Vector3.new(0, 0, 0)
 
--- Revenge tracking
 local lastKiller = nil
 
--- Holster/unequip all tools
 local function unequipAllTools()
     pcall(function()
         local humanoid = getLocalHumanoid()
@@ -672,10 +662,8 @@ local function resolveTargetFromArgs(args)
     return nil, playerName
 end
 
--- AutoPredic value (prediction multiplier)
 local AutoPredic = 0.155
 
--- Strafe defaults for gun commands
 local STRAFE_DEFAULTS = {
     height = 8,
     radius = 10,
@@ -692,7 +680,6 @@ local function startGunStrafe(target, config)
     local angle = 0
     local connection
     
-    -- Immediately position stand near target (no delay)
     local myHRP = getLocalHRP()
     local targetRoot = getRoot(target)
     local targetHumanoid = getHumanoid(target)
@@ -787,7 +774,6 @@ local function startGunStrafe(target, config)
     end
 end
 
--- TargetMelee function from stando.luau
 local function TargetMelee(target)
     if not target or isDead(target) then return end
     
@@ -798,7 +784,6 @@ local function TargetMelee(target)
     if not q or not e or not t then return end
     
     pcall(function()
-        -- Stop all animations
         local humanoid = getLocalHumanoid()
         if humanoid then
             for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
@@ -806,9 +791,7 @@ local function TargetMelee(target)
             end
         end
         
-        -- Position the stand
         if isInVehicle(target) then
-            -- Vehicle handling
             local vehiclesFolder = getVehiclesFolder()
             local vehicle = vehiclesFolder and vehiclesFolder:FindFirstChild(target.Name)
             if vehicle then
@@ -827,16 +810,12 @@ local function TargetMelee(target)
                 t.CFrame = CFrame.new(q.Position + vehicleVelocity * 0.4)
             end
         elseif hasReduceWalk(LocalPlayer) then
-            -- ReduceWalk active - use MoveDirection prediction
             if e.FloorMaterial == Enum.Material.Air then
-                -- Target is jumping/falling
                 t.CFrame = CFrame.new(q.Position + Vector3.new(0, -6.8, 0) + e.MoveDirection * AutoPredic * e.WalkSpeed) * CFrame.Angles(math.pi * 0.5, 0, 0)
             else
-                -- Target on ground
                 t.CFrame = CFrame.new(q.Position + Vector3.new(0, 0, 0) + e.MoveDirection * AutoPredic * e.WalkSpeed)
             end
         else
-            -- Normal prediction using velocity
             if e.FloorMaterial == Enum.Material.Air then
                 t.CFrame = CFrame.new(q.Position.X + q.Velocity.X * AutoPredic, q.Position.Y + q.Velocity.Y * 0, q.Position.Z + q.Velocity.Z * AutoPredic) * CFrame.new(0, -6.8, 0) * CFrame.Angles(math.pi * 0.5, 0, 0)
             else
@@ -844,12 +823,10 @@ local function TargetMelee(target)
             end
         end
         
-        -- Set camera subject
         Workspace.Camera.CameraSubject = e
     end)
 end
 
--- Knock command
 API.Create("knock", function(args)
     local playerName = table.concat(args, " ")
     local target = (playerName == "" and API.ownerPlayer) or API.getPlayer(playerName)
@@ -887,16 +864,13 @@ API.Create("knock", function(args)
         return
     end
     
-    -- Save original state
     local originalFollowing = Stand.Following
     local originalTarget = API.currentFollowTarget
     
-    -- Stop current actions
     Stand.Attacking = false
     Stand.Following = false
     API.currentFollowTarget = nil
     
-    -- Equip combat
     if not LocalPlayer.Character:FindFirstChild("Combat") then
         if LocalPlayer.Backpack:FindFirstChild("Combat") then
             LocalPlayer.Backpack:FindFirstChild("Combat").Parent = LocalPlayer.Character
@@ -905,9 +879,8 @@ API.Create("knock", function(args)
     
     API.sendChat("Knocking " .. target.Name .. "...")
     
-    -- Knock loop
     local knockStartTime = tick()
-    local timeout = 30 -- 30 second timeout
+    local timeout = 30
     
     task.spawn(function()
         repeat
@@ -918,18 +891,15 @@ API.Create("knock", function(args)
             end
             
             if targetKO.Value == false then
-                -- Continue attacking
                 Equip("Combat")
                 if MainEvent then
                     MainEvent:FireServer("ChargeButton")
                 end
                 TargetMelee(target)
             else
-                -- Target is knocked out
                 break
             end
             
-            -- Check timeout
             if tick() - knockStartTime > timeout then
                 API.sendChat("Knock timeout!")
                 break
@@ -937,7 +907,6 @@ API.Create("knock", function(args)
             
         until targetKO.Value == true or not target.Character or isDead(target)
         
-        -- Cleanup - wait for attacking animation to finish
         local attackingValue = Attacking(LocalPlayer)
         if attackingValue then
             local waitStart = tick()
@@ -946,13 +915,11 @@ API.Create("knock", function(args)
             end
         end
         
-        -- Reset camera
         local localHumanoid = getLocalHumanoid()
         if localHumanoid then
             Workspace.Camera.CameraSubject = localHumanoid
         end
         
-        -- Restore original state
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
         
@@ -960,7 +927,6 @@ API.Create("knock", function(args)
             API.sendChat(target.Name .. " has been knocked out!")
         end
         
-        -- Return to owner (summon)
         if API.Summon then
             task.wait(0.5)
             API.Summon()
@@ -968,7 +934,6 @@ API.Create("knock", function(args)
     end)
 end)
 
--- Stomp command
 API.Create("stomp", function(args)
     local playerName = table.concat(args, " ")
     local target = (playerName == "" and API.ownerPlayer) or API.getPlayer(playerName)
@@ -1001,11 +966,9 @@ API.Create("stomp", function(args)
         return
     end
     
-    -- Save original state
     local originalFollowing = Stand.Following
     local originalTarget = API.currentFollowTarget
     
-    -- Stop current actions
     Stand.Attacking = false
     Stand.Following = false
     API.currentFollowTarget = nil
@@ -1030,16 +993,13 @@ API.Create("stomp", function(args)
     API.sendChat("Stomping " .. target.Name .. "...")
     
     task.spawn(function()
-        -- First knock them out if not already KO'd
         if targetKO.Value == false then
-            -- Equip combat
             if not LocalPlayer.Character:FindFirstChild("Combat") then
                 if LocalPlayer.Backpack:FindFirstChild("Combat") then
                     LocalPlayer.Backpack:FindFirstChild("Combat").Parent = LocalPlayer.Character
                 end
             end
             
-            -- Knock loop
             local knockStartTime = tick()
             local timeout = 30
             
@@ -1067,7 +1027,6 @@ API.Create("stomp", function(args)
                 
             until targetKO.Value == true or not target.Character or isDead(target)
             
-            -- Wait for attacking animation to finish
             local attackingValue = Attacking(LocalPlayer)
             if attackingValue then
                 local waitStart = tick()
@@ -1077,7 +1036,6 @@ API.Create("stomp", function(args)
             end
         end
         
-        -- Now stomp
         if targetKO.Value == true and not isDead(target) then
             performStomp()
             task.wait(0.5)
@@ -1089,21 +1047,17 @@ API.Create("stomp", function(args)
             end
         end
         
-        -- Reset camera
         local localHumanoid = getLocalHumanoid()
         if localHumanoid then
             Workspace.Camera.CameraSubject = localHumanoid
         end
         
-        -- Restore original state
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
     end)
 end)
 
--- Revenge command - knocks and stomps whoever killed/stomped the owner
 API.Create("revenge", function(args)
-    -- Ensure auto modes are disabled before revenge starts
     stopAutokill("Revenge command activated - stopping AutoKill")
     stopGautokill("Revenge command activated - stopping GAutoKill")
 
@@ -1135,11 +1089,9 @@ API.Create("revenge", function(args)
     
     API.sendChat("Taking revenge on " .. target.Name .. "!")
     
-    -- Save original state
     local originalFollowing = Stand.Following
     local originalTarget = API.currentFollowTarget
     
-    -- Stop current actions
     Stand.Attacking = false
     Stand.Following = false
     API.currentFollowTarget = nil
@@ -1151,9 +1103,7 @@ API.Create("revenge", function(args)
             return
         end
         
-        -- First knock them out if not already KO'd
         if targetKO.Value == false then
-            -- Equip combat
             if not standCharacter:FindFirstChild("Combat") then
                 local backpack = LocalPlayer:FindFirstChild("Backpack")
                 if backpack and backpack:FindFirstChild("Combat") then
@@ -1161,7 +1111,6 @@ API.Create("revenge", function(args)
                 end
             end
             
-            -- Knock loop
             local knockStartTime = tick()
             local timeout = 30
             
@@ -1189,7 +1138,6 @@ API.Create("revenge", function(args)
                 
             until targetKO.Value == true or not target.Character or isDead(target)
             
-            -- Wait for attacking animation to finish
             local attackingValue = Attacking(LocalPlayer)
             if attackingValue then
                 local waitStart = tick()
@@ -1199,7 +1147,6 @@ API.Create("revenge", function(args)
             end
         end
         
-        -- Now stomp
         if targetKO.Value == true and not isDead(target) then
             local targetTorso = getTorso(target)
             local myHRP = getLocalHRP()
@@ -1225,17 +1172,14 @@ API.Create("revenge", function(args)
             API.sendChat("Revenge failed to knock " .. target.Name)
         end
         
-        -- Reset camera
         local localHumanoid = getLocalHumanoid()
         if localHumanoid then
             Workspace.Camera.CameraSubject = localHumanoid
         end
         
-        -- Restore original state
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
         
-        -- Return to owner
         if API.Summon then
             task.wait(0.5)
             API.Summon()
@@ -1243,7 +1187,6 @@ API.Create("revenge", function(args)
     end)
 end)
 
--- Gun command (buys LMG)
 API.Create("gun", function(args)
     local alreadyOwned = hasTool(GUN_NAME)
     if alreadyOwned then
@@ -1276,7 +1219,6 @@ API.Create("gun", function(args)
     end)
 end)
 
--- GKnock command (gun knock using ShootGun)
 API.Create("gknock", function(args)
     local target, playerName = resolveTargetFromArgs(args)
     if not target or not target.Character then
@@ -1349,7 +1291,6 @@ API.Create("gknock", function(args)
             API.sendChat(target.Name .. " has been gun knocked out!")
         end
         
-        -- Unequip gun after command
         unequipAllTools()
         
         if API.Summon then
@@ -1359,7 +1300,6 @@ API.Create("gknock", function(args)
     end)
 end)
 
--- GStomp command (gun stomp using ShootGun)
 API.Create("gstomp", function(args)
     local target, playerName = resolveTargetFromArgs(args)
     if not target or not target.Character then
@@ -1450,7 +1390,6 @@ API.Create("gstomp", function(args)
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
         
-        -- Unequip gun after command
         unequipAllTools()
         
         if API.Summon then
@@ -1460,7 +1399,6 @@ API.Create("gstomp", function(args)
     end)
 end)
 
--- Bring command (grab and bring knocked target to owner)
 API.Create("bring", function(args)
     local target, playerName = resolveTargetFromArgs(args)
     if not target or not target.Character then
@@ -1486,7 +1424,6 @@ API.Create("bring", function(args)
     API.sendChat("Bringing " .. target.Name .. "...")
     
     task.spawn(function()
-        -- First knock them out if not already KO'd
         if targetKO.Value == false then
             if not LocalPlayer.Character:FindFirstChild("Combat") then
                 if LocalPlayer.Backpack:FindFirstChild("Combat") then
@@ -1530,7 +1467,6 @@ API.Create("bring", function(args)
             end
         end
         
-        -- Now grab and bring them
         if targetKO.Value == true and not isDead(target) and API.ownerPlayer and API.ownerPlayer.Character then
             local targetTorso = getTorso(target)
             local myHRP = getLocalHRP()
@@ -1603,11 +1539,10 @@ API.Create("bring", function(args)
     end)
 end)
 
--- GBring command (gun bring)
 API.Create("gbring", function(args)
     local target, playerName = resolveTargetFromArgs(args)
     if not target or not target.Character then
-        API.sendChat("Target not found!")
+        API.ForceChat("Target not found!")
         return
     end
     if isDead(target) then
@@ -1630,13 +1565,10 @@ API.Create("gbring", function(args)
     Stand.Attacking = false
     Stand.Following = false
     API.currentFollowTarget = nil
-    
-    API.sendChat("Gun bringing " .. target.Name .. "...")
-    
+        
     task.spawn(function()
         local stopStrafe = nil
         
-        -- Knock with gun if not already KO'd
         if targetKO.Value == false then
             stopStrafe = startGunStrafe(target, {mode = "Sky", height = 8, radius = 10})
             
@@ -1645,7 +1577,7 @@ API.Create("gbring", function(args)
             
             while target.Character and not isDead(target) and targetKO.Value == false do
                 if tick() - startTime > timeout then
-                    API.sendChat("Gun knock timeout!")
+                    print("Gun knock timeout!")
                     if stopStrafe then stopStrafe() end
                     Stand.Following = originalFollowing
                     API.currentFollowTarget = originalTarget
@@ -1655,7 +1587,7 @@ API.Create("gbring", function(args)
                 
                 local gun = ensureToolEquipped(GUN_NAME)
                 if not gun then
-                    API.sendChat("Lost weapon!")
+                    print("Lost weapon!")
                     if stopStrafe then stopStrafe() end
                     Stand.Following = originalFollowing
                     API.currentFollowTarget = originalTarget
@@ -1664,7 +1596,7 @@ API.Create("gbring", function(args)
                 
                 local shotSuccess = shootTargetWithGun(target, gun)
                 if not shotSuccess then
-                    API.sendChat("Failed to shoot!")
+                    print("Failed to shoot!")
                     if stopStrafe then stopStrafe() end
                     Stand.Following = originalFollowing
                     API.currentFollowTarget = originalTarget
@@ -1682,7 +1614,6 @@ API.Create("gbring", function(args)
             end
         end
         
-        -- Now grab and bring them
         if targetKO.Value == true and not isDead(target) and API.ownerPlayer and API.ownerPlayer.Character then
             local targetTorso = getTorso(target)
             local myHRP = getLocalHRP()
@@ -1733,7 +1664,7 @@ API.Create("gbring", function(args)
                 local finalTorso = getTorso(target) or targetTorso
                 local finalOwnerRoot = getRoot(API.ownerPlayer) or ownerRoot
                 if target.Character and finalTorso and finalOwnerRoot and (target.Character:FindFirstChild("GRABBING_CONSTRAINT") or (finalTorso.Position - finalOwnerRoot.Position).Magnitude < 15) then
-                    API.sendChat(target.Name .. " has been gun brought!")
+
                 else
                     API.sendChat("Failed to grab " .. target.Name)
                 end
@@ -1748,7 +1679,6 @@ API.Create("gbring", function(args)
         Stand.Following = originalFollowing
         API.currentFollowTarget = originalTarget
         
-        -- Unequip gun after command
         unequipAllTools()
         
         if API.Summon then
@@ -1758,10 +1688,9 @@ API.Create("gbring", function(args)
     end)
 end)
 
--- Revenge command (stomp the player who killed/stomped the owner)
 API.Create("revenge", function(args)
     if not lastKiller or not lastKiller.Character then
-        API.sendChat("No one to get revenge on! (No recent killer tracked)")
+        API.sendChat("No one to get revenge on!")
         return
     end
     
@@ -1777,15 +1706,13 @@ API.Create("revenge", function(args)
         return
     end
     
-    -- Check if we have a gun
     local hasGun = hasTool(GUN_NAME)
     
     if hasGun then
-        API.sendChat("Getting revenge on " .. lastKiller.Name .. " with gun...")
         
         local tool = ensureToolEquipped(GUN_NAME)
         if not tool then
-            API.sendChat("Failed to equip gun!")
+            print("Failed to equip gun!")
             return
         end
         
@@ -1816,7 +1743,7 @@ API.Create("revenge", function(args)
                     
                     local gun = ensureToolEquipped(GUN_NAME)
                     if not gun then
-                        API.sendChat("Lost weapon!")
+                        print("Lost weapon!")
                         if stopStrafe then stopStrafe() end
                         Stand.Following = originalFollowing
                         API.currentFollowTarget = originalTarget
@@ -1825,7 +1752,7 @@ API.Create("revenge", function(args)
                     
                     local shotSuccess = shootTargetWithGun(lastKiller, gun)
                     if not shotSuccess then
-                        API.sendChat("Failed to shoot!")
+                        print("Failed to shoot!")
                         if stopStrafe then stopStrafe() end
                         Stand.Following = originalFollowing
                         API.currentFollowTarget = originalTarget
@@ -1847,9 +1774,9 @@ API.Create("revenge", function(args)
                 stompTarget(lastKiller)
                 task.wait(0.5)
                 if isDead(lastKiller) then
-                    API.sendChat("Revenge complete! " .. lastKiller.Name .. " has been eliminated!")
+                    
                 else
-                    API.sendChat("Stomped " .. lastKiller.Name)
+
                 end
             end
             
@@ -1861,7 +1788,6 @@ API.Create("revenge", function(args)
             Stand.Following = originalFollowing
             API.currentFollowTarget = originalTarget
             
-            -- Unequip gun after command
             unequipAllTools()
             
             lastKiller = nil
@@ -1871,10 +1797,7 @@ API.Create("revenge", function(args)
                 API.Summon()
             end
         end)
-    else
-        -- Use combat tool
-        API.sendChat("Getting revenge on " .. lastKiller.Name .. " with combat...")
-        
+    else        
         local originalFollowing = Stand.Following
         local originalTarget = API.currentFollowTarget
         Stand.Attacking = false
@@ -1910,7 +1833,7 @@ API.Create("revenge", function(args)
                     end
                     
                     if tick() - knockStartTime > timeout then
-                        API.sendChat("Knock timeout!")
+
                         break
                     end
                     
@@ -1929,9 +1852,9 @@ API.Create("revenge", function(args)
                 stompTarget(lastKiller)
                 task.wait(0.5)
                 if isDead(lastKiller) then
-                    API.sendChat("Revenge complete! " .. lastKiller.Name .. " has been eliminated!")
+
                 else
-                    API.sendChat("Stomped " .. lastKiller.Name)
+
                 end
             end
             
@@ -1953,7 +1876,6 @@ API.Create("revenge", function(args)
     end
 end)
 
--- Drop command - drops grabbed player/item
 API.Create("drop", function(args)
     if not MainEvent then
         API.sendChat("MainEvent not found!")
@@ -1964,7 +1886,6 @@ API.Create("drop", function(args)
     API.sendChat("Dropped!")
 end)
 
--- Wallet command - equips wallet
 API.Create("wallet", function(args)
     local character = getLocalCharacter()
     local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
@@ -1976,7 +1897,7 @@ API.Create("wallet", function(args)
     local walletTool = backpack:FindFirstChild("Wallet")
     if walletTool then
         walletTool.Parent = character
-        API.sendChat("Wallet equipped!")
+
     else
         API.sendChat("Wallet not found in backpack!")
     end
@@ -1989,16 +1910,13 @@ local function dropTenK()
     end
     
     MainEvent:FireServer("DropMoney", "10000")
-    API.sendChat("Dropped $10,000!")
     return true
 end
 
--- DropCash command - drops $10,000
 API.Create("dropcash", function(args)
     dropTenK()
 end)
 
--- Dcash alias for dropcash
 API.Create("dcash", function(args)
     dropTenK()
 end)
@@ -2032,7 +1950,6 @@ local function ensureMaskToolAvailable()
         return existing
     end
 
-    -- Use persistent buying approach like otherstands version
     local shopFolder = getShopFolder()
     if not shopFolder then
         return nil, "Shop folder missing"
@@ -2060,7 +1977,6 @@ local function ensureMaskToolAvailable()
         return nil, "fireclickdetector unavailable"
     end
     
-    -- Teleport to shop and buy (similar to otherstands Buying function)
     local originalCFrame = hrp.CFrame
     local originalCameraSubject = Workspace.CurrentCamera.CameraSubject
     
@@ -2070,15 +1986,13 @@ local function ensureMaskToolAvailable()
     
     task.wait(0.1)
     
-    -- Repeat-until loop to keep buying until tool appears (like otherstands)
     local startTime = tick()
-    local timeout = 15 -- 15 second timeout
+    local timeout = 15 
     local success = false
     
     repeat
         task.wait()
         pcall(function()
-            -- Make character non-collidable during purchase
             local character = getLocalCharacter()
             if character then
                 for _, part in pairs(character:GetDescendants()) do
@@ -2091,31 +2005,25 @@ local function ensureMaskToolAvailable()
                 end
             end
             
-            -- Set camera to shop item
             pcall(function()
                 Workspace.CurrentCamera.CameraSubject = head
             end)
             
-            -- Position player at shop item
             hrp.CFrame = head.CFrame * CFrame.new(0, -5, 0)
             
-            -- Click the detector
             clickFunction(detector)
         end)
         
-        -- Check if tool appeared
         if getMaskTool() then
             success = true
             break
         end
         
-        -- Timeout check
         if (tick() - startTime) >= timeout then
             break
         end
     until getMaskTool()
     
-    -- Restore camera
     pcall(function()
         if originalCameraSubject then
             Workspace.CurrentCamera.CameraSubject = originalCameraSubject
@@ -2124,7 +2032,6 @@ local function ensureMaskToolAvailable()
         end
     end)
     
-    -- Return to original position
     pcall(function()
         hrp.CFrame = originalCFrame
     end)
@@ -2163,9 +2070,7 @@ local function equipMaskTool(maskTool, character, humanoid)
     return false
 end
 
--- Mask command - puts on mask
 API.Create("mask", function(args)
-    API.sendChat("Buying mask...")
     
     local maskTool, errorMsg = ensureMaskToolAvailable()
     if not maskTool then
@@ -2182,13 +2087,12 @@ API.Create("mask", function(args)
     
     local equipped = equipMaskTool(maskTool, character, humanoid)
     if equipped then
-        API.sendChat("Mask equipped!")
+
     else
         API.sendChat("Failed to equip mask!")
     end
 end)
 
--- AMask command - automatically puts on mask when no mask is equipped
 local amaskActive = false
 local amaskConnection = nil
 local amaskBuying = false
@@ -2200,7 +2104,6 @@ API.Create("amask", function(args)
     end
     
     amaskActive = true
-    API.sendChat("AMask activated - will auto-equip mask when missing")
     
     local function checkAndEquipMask()
         if not amaskActive or amaskBuying then return end
@@ -2241,7 +2144,7 @@ API.Create("amask", function(args)
             end
             
             if equipMaskTool(maskTool, character, humanoid) then
-                print("[AMask] Auto-equipped mask")
+
             end
             
             amaskBuying = false
@@ -2278,7 +2181,6 @@ API.Create("unamask", function(args)
     API.sendChat("AMask deactivated")
 end)
 
--- Chair destroyer (from memory - prevents stand from sitting)
 task.spawn(function()
     task.wait(2)
     
@@ -2305,14 +2207,12 @@ task.spawn(function()
         end
     end
     
-    -- Destroy existing chairs
     for _, obj in pairs(Workspace:GetDescendants()) do
         pcall(function()
             destroyChair(obj)
         end)
     end
     
-    -- Monitor for new chairs
     Workspace.DescendantAdded:Connect(function(obj)
         task.wait(0.1)
         pcall(function()
@@ -2321,7 +2221,6 @@ task.spawn(function()
     end)
 end)
 
--- AutoKill / GAutoKill command handling
 local autokillState = {
     active = false,
     connection = nil,
@@ -2856,10 +2755,9 @@ wrapBaseCommandWithAutoReset("summon")
 wrapBaseCommandWithAutoReset("stop")
 wrapBaseCommandWithAutoReset("vanish")
 
--- Auto-activate AMask if configured
 if DahoodMainConfig.Automask == true and not amaskActive then
     task.spawn(function()
-        task.wait(2) -- Wait a bit for everything to load
+        task.wait(2) 
         amaskActive = true
         print("[Da Hood Config] Auto-activating AMask (getgenv config: Automask = true)")
         
@@ -2926,8 +2824,21 @@ if DahoodMainConfig.Automask == true and not amaskActive then
     end)
 end
 
-print("[Da Hood Config] Loaded successfully!")
-print("[Da Hood Config] Commands: knock, stomp, gun, gknock, gstomp, bring, gbring, revenge, drop, wallet, dropcash/dcash, mask, amask, unamask, autokill/auto, gautokill/gauto")
-print("[Da Hood Config] Prediction: 0.155 (AutoPredic from stando script)")
-print("[Da Hood Config] Revenge tracking active - will remember who kills/stomps the owner")
-print("[Da Hood Config] Config: getgenv().SocietyStand.Dahood.Main.Automask = " .. tostring(DahoodMainConfig.Automask))
+API.Create("stando", function(args)
+    ForceChat("This is not stando mwuah 😙")
+end)
+
+API.Create("skido", function(args)
+    ForceChat("This is not skido mwuah 😙")
+end)
+
+API.Create("stand", function(args)
+    ForceChat("This is Society Stand Get us at dsc[.]gg[/]society-stand Join Now cuz why not mwuah 😙")
+end)
+
+
+API.Notify({
+    Title = "GAME CONFIG",
+    Description = (game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name or "Game") .. " Loaded",
+    Duration = 20
+})
