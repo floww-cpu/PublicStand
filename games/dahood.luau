@@ -2,16 +2,12 @@ local globalEnv = getgenv()
 globalEnv.SocietyStandConfig = globalEnv.SocietyStandConfig or {}
 
 local SocietyStandConfig = globalEnv.SocietyStandConfig
-SocietyStandConfig.Dahood = SocietyStandConfig.Dahood or {}
-SocietyStandConfig.Dahood.Main = SocietyStandConfig.Dahood.Main or {}
 
-if SocietyStandConfig.Dahood.Main.AntiStomp == nil then
-    SocietyStandConfig.Dahood.Main.AntiStomp = true
-end
+SocietyStandConfig.Dahood = type(SocietyStandConfig.Dahood) == "table" and SocietyStandConfig.Dahood or {}
+SocietyStandConfig.Dahood.Main = type(SocietyStandConfig.Dahood.Main) == "table" and SocietyStandConfig.Dahood.Main or {}
 
-if SocietyStandConfig.Dahood.Main.Automask == nil then
-    SocietyStandConfig.Dahood.Main.Automask = false
-end
+SocietyStandConfig.Dahood.Main.AntiStomp = (SocietyStandConfig.Dahood.Main.AntiStomp == nil) and true or SocietyStandConfig.Dahood.Main.AntiStomp
+SocietyStandConfig.Dahood.Main.Automask = (SocietyStandConfig.Dahood.Main.Automask == nil) and false or SocietyStandConfig.Dahood.Main.Automask
 
 local requiredFields = {"Stand", "Create", "Stop", "sendChat", "getPlayer", "ownerPlayer", "Notify", "ForceChat"}
 local function isAPIReady()
