@@ -2848,15 +2848,17 @@ if DahoodMainConfig.Automask == true and not amaskActive then
     end)
 end
 
-RunService.Stepped:Connect(function()
-    if DahoodMainConfig.AntiStomp then
+local RS = game:GetService("RunService")
+local pl = game.Players.LocalPlayer
+
+RS.Stepped:Connect(function()
+    if DahoodMainConfig and DahoodMainConfig.AntiStomp then
         pcall(function()
             local hum = getLocalHumanoid()
-            local KOv = KO(LocalPlayer)
-            if not isDead(LocalPlayer)
-            and KOv and KOv.Value == false
-            and hum and hum.Health <= 80 then
-                LocalPlayer.Character.Humanoid.Health = 0
+            local K = KO(pl)
+            local isKO = K and typeof(K.Value) == "boolean" and K.Value
+            if not isDead(pl) and not isKO and hum and hum.Health < 60 then
+                hum.Health = 0
             end
         end)
     end
