@@ -2833,8 +2833,42 @@ API.Create("skido", function(args)
 end)
 
 API.Create("stand", function(args)
-    API.ForceChat("This is Society Stand Get us at dsc[.]gg[/]society-stand Join Now cuz why not mwuah 😙")
+    -- groups of obfuscated fonts
+    local part1 = { -- "dsc"
+        "dѕc", "ԁѕᴄ", "ɗşç", "đşċ", "𝐝𝐬𝐜",
+        "𝘥𝘴𝘤", "𝙙𝙨𝙘", "𝒹𝓈𝒸", "𝖉𝖘𝖈", "𝓭𝓼𝓬",
+        "ｄｓｃ", "ᗪᔕᑕ", "𝓓𝓢𝓒", "ɗ𝓼𝓬"
+    }
+
+    local part2 = { -- ".gg"
+        ".ɡɡ", ".𝐠𝐠", ".𝓰𝓰", "．ｇｇ", ".ɢɢ", ".𝑔𝑔",
+        ".𝖌𝖌", ".𝙜𝙜", ".𝘨𝘨", "·𝓰𝓰", "․ɡɡ"
+    }
+
+    local part3 = { 
+        "ѕосіеtу‑ѕtаnd",
+        "şøçïëłÿ‑şţåñđ",
+        "şǿċïéţý‑šťåñd",
+        "𝙨𝙤𝙘𝙞𝙚𝙩𝙮‑𝙨𝙩𝙖𝙣𝙙",
+        "𝓼𝓸𝓬𝓲𝓮𝓽𝔂‑𝓼𝓽𝓪𝓷𝓭",
+        "𝖘𝖔𝖈𝖎𝖊𝖙𝖞‑𝖘𝖙𝖆𝖓𝖉",
+        "ร๏ςเєՇץ‑รՇคη๔",
+        "ѕocιετψ‑ѕтαηd",
+    }
+
+    local p1 = part1[math.random(#part1)]
+    local p2 = part2[math.random(#part2)]
+    local p3 = part3[math.random(#part3)]
+
+    API.ForceChat(p1)
+    wait(0.1)
+    API.ForceChat(p2)
+    wait(0.1)
+    API.ForceChat(p3)
+
 end)
+
+
 
 
 
