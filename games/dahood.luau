@@ -2825,16 +2825,17 @@ if DahoodMainConfig.Automask == true and not amaskActive then
 end
 
 API.Create("stando", function(args)
-    ForceChat("This is not stando mwuah 😙")
+    API.ForceChat("This is not stando mwuah 😙")
 end)
 
 API.Create("skido", function(args)
-    ForceChat("This is not skido mwuah 😙")
+    API.ForceChat("This is not skido mwuah 😙")
 end)
 
 API.Create("stand", function(args)
-    ForceChat("This is Society Stand Get us at dsc[.]gg[/]society-stand Join Now cuz why not mwuah 😙")
+    API.ForceChat("This is Society Stand Get us at dsc[.]gg[/]society-stand Join Now cuz why not mwuah 😙")
 end)
+
 
 
 API.Notify({
