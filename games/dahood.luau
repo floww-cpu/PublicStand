@@ -183,8 +183,12 @@ local function detectStomper(character)
     return closestPlayer
 end
 
+local ownerRevengeConnections = {}
+local trackedOwnerForRevenge = nil
+
 local function attachRevengeTracker(character)
     if not character then return end
+    lastKiller = nil
     task.spawn(function()
         local bodyEffects = character:WaitForChild("BodyEffects", 10)
         if not bodyEffects then return end
@@ -238,10 +242,44 @@ local function attachRevengeTracker(character)
     end)
 end
 
-if LocalPlayer.Character then
-    attachRevengeTracker(LocalPlayer.Character)
+local function bindRevengeTrackerToOwner(player)
+    for _, conn in ipairs(ownerRevengeConnections) do
+        conn:Disconnect()
+    end
+    ownerRevengeConnections = {}
+    trackedOwnerForRevenge = player
+    if not player then return end
+
+    local function onCharacterAdded(character)
+        attachRevengeTracker(character)
+    end
+
+    if player.Character then
+        attachRevengeTracker(player.Character)
+    end
+
+    table.insert(ownerRevengeConnections, player.CharacterAdded:Connect(onCharacterAdded))
 end
-LocalPlayer.CharacterAdded:Connect(attachRevengeTracker)
+
+bindRevengeTrackerToOwner(API.ownerPlayer)
+
+Players.PlayerAdded:Connect(function(player)
+    if API.ownerPlayer and player == API.ownerPlayer then
+        bindRevengeTrackerToOwner(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    if player == lastKiller then
+        lastKiller = nil
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if API.ownerPlayer ~= trackedOwnerForRevenge then
+        bindRevengeTrackerToOwner(API.ownerPlayer)
+    end
+end)
 
 -- Helper functions
 local function getLocalPlayer()
@@ -1063,6 +1101,148 @@ API.Create("stomp", function(args)
     end)
 end)
 
+-- Revenge command - knocks and stomps whoever killed/stomped the owner
+API.Create("revenge", function(args)
+    -- Ensure auto modes are disabled before revenge starts
+    stopAutokill("Revenge command activated - stopping AutoKill")
+    stopGautokill("Revenge command activated - stopping GAutoKill")
+
+    local owner = API.ownerPlayer
+    if (not lastKiller or lastKiller.Parent ~= Players) and owner and owner.Character then
+        local stomper = detectStomper(owner.Character)
+        if stomper then
+            lastKiller = stomper
+            print(string.format("[Revenge Command] Using stomper %s as revenge target", stomper.Name))
+        end
+    end
+
+    if not lastKiller or lastKiller.Parent ~= Players then
+        API.sendChat("No revenge target found (nobody has killed/stomped the owner yet)")
+        return
+    end
+    
+    local target = lastKiller
+    if not target.Character then
+        API.sendChat("Revenge target has no character!")
+        return
+    end
+    
+    local targetKO = KO(target)
+    if not targetKO then
+        API.sendChat("Revenge target invalid!")
+        return
+    end
+    
+    API.sendChat("Taking revenge on " .. target.Name .. "!")
+    
+    -- Save original state
+    local originalFollowing = Stand.Following
+    local originalTarget = API.currentFollowTarget
+    
+    -- Stop current actions
+    Stand.Attacking = false
+    Stand.Following = false
+    API.currentFollowTarget = nil
+    
+    task.spawn(function()
+        local standCharacter = getLocalCharacter()
+        if not standCharacter then
+            API.sendChat("Stand character missing - cannot execute revenge")
+            return
+        end
+        
+        -- First knock them out if not already KO'd
+        if targetKO.Value == false then
+            -- Equip combat
+            if not standCharacter:FindFirstChild("Combat") then
+                local backpack = LocalPlayer:FindFirstChild("Backpack")
+                if backpack and backpack:FindFirstChild("Combat") then
+                    backpack:FindFirstChild("Combat").Parent = standCharacter
+                end
+            end
+            
+            -- Knock loop
+            local knockStartTime = tick()
+            local timeout = 30
+            
+            repeat
+                RunService.Stepped:Wait()
+                
+                if not target.Character or isDead(target) then
+                    break
+                end
+                
+                if targetKO.Value == false then
+                    Equip("Combat")
+                    if MainEvent then
+                        MainEvent:FireServer("ChargeButton")
+                    end
+                    TargetMelee(target)
+                else
+                    break
+                end
+                
+                if tick() - knockStartTime > timeout then
+                    API.sendChat("Revenge knock timeout!")
+                    break
+                end
+                
+            until targetKO.Value == true or not target.Character or isDead(target)
+            
+            -- Wait for attacking animation to finish
+            local attackingValue = Attacking(LocalPlayer)
+            if attackingValue then
+                local waitStart = tick()
+                while attackingValue.Value == true and tick() - waitStart < 5 do
+                    task.wait(0.1)
+                end
+            end
+        end
+        
+        -- Now stomp
+        if targetKO.Value == true and not isDead(target) then
+            local targetTorso = getTorso(target)
+            local myHRP = getLocalHRP()
+            
+            if targetTorso and myHRP then
+                pcall(function()
+                    myHRP.CFrame = CFrame.new(targetTorso.Position + Vector3.new(0, 5, 0))
+                    task.wait(0.1)
+                    if MainEvent then
+                        MainEvent:FireServer("Stomp")
+                    end
+                end)
+            end
+            
+            task.wait(0.5)
+            
+            if isDead(target) then
+                API.sendChat("Revenge complete! " .. target.Name .. " has been eliminated!")
+            else
+                API.sendChat("Revenge stomped " .. target.Name)
+            end
+        else
+            API.sendChat("Revenge failed to knock " .. target.Name)
+        end
+        
+        -- Reset camera
+        local localHumanoid = getLocalHumanoid()
+        if localHumanoid then
+            Workspace.Camera.CameraSubject = localHumanoid
+        end
+        
+        -- Restore original state
+        Stand.Following = originalFollowing
+        API.currentFollowTarget = originalTarget
+        
+        -- Return to owner
+        if API.Summon then
+            task.wait(0.5)
+            API.Summon()
+        end
+    end)
+end)
+
 -- Gun command (buys LMG)
 API.Create("gun", function(args)
     local alreadyOwned = hasTool(GUN_NAME)
@@ -1837,7 +2017,10 @@ local function getMaskTool()
 
     local backpack = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
     if backpack then
-        return backpack:FindFirstChild(MASK_TOOL_NAME)
+        local tool = backpack:FindFirstChild(MASK_TOOL_NAME)
+        if tool then
+            return tool
+        end
     end
 
     return nil
@@ -1849,7 +2032,7 @@ local function ensureMaskToolAvailable()
         return existing
     end
 
-    -- Use a more persistent buying approach like the otherstands version
+    -- Use persistent buying approach like otherstands version
     local shopFolder = getShopFolder()
     if not shopFolder then
         return nil, "Shop folder missing"
@@ -1867,49 +2050,83 @@ local function ensureMaskToolAvailable()
     end
     
     local hrp = getLocalHRP()
-    if not hrp then
-        return nil, "HumanoidRootPart missing"
+    local humanoid = getLocalHumanoid()
+    if not hrp or not humanoid then
+        return nil, "HumanoidRootPart or Humanoid missing"
     end
-    
-    local originalCFrame
-    pcall(function()
-        originalCFrame = hrp.CFrame
-        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
-    end)
-    
-    task.wait(0.15)
     
     local clickFunction = getClickDetectorFunc()
     if not clickFunction then
-        pcall(function()
-            if originalCFrame then
-                hrp.CFrame = originalCFrame
-            end
-        end)
         return nil, "fireclickdetector unavailable"
     end
     
-    -- Keep trying until we get the tool (similar to otherstands version)
-    local startTime = tick()
-    local timeout = 10 -- 10 second timeout
-    
-    while not getMaskTool() and (tick() - startTime) < timeout do
-        pcall(function()
-            clickFunction(detector)
-        end)
-        task.wait(0.25)
-        
-        -- Check if tool appeared
-        local tool = getMaskTool()
-        if tool then
-            break
-        end
-    end
+    -- Teleport to shop and buy (similar to otherstands Buying function)
+    local originalCFrame = hrp.CFrame
+    local originalCameraSubject = Workspace.CurrentCamera.CameraSubject
     
     pcall(function()
-        if originalCFrame then
-            hrp.CFrame = originalCFrame
+        hrp.CFrame = head.CFrame * CFrame.new(0, 3, 0)
+    end)
+    
+    task.wait(0.1)
+    
+    -- Repeat-until loop to keep buying until tool appears (like otherstands)
+    local startTime = tick()
+    local timeout = 15 -- 15 second timeout
+    local success = false
+    
+    repeat
+        task.wait()
+        pcall(function()
+            -- Make character non-collidable during purchase
+            local character = getLocalCharacter()
+            if character then
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") or part:IsA("MeshPart") or part:IsA("Part") then
+                        if part.CanCollide == true then
+                            part.CanCollide = false
+                        end
+                        part.Velocity = Vector3.new(0, 0, 0)
+                    end
+                end
+            end
+            
+            -- Set camera to shop item
+            pcall(function()
+                Workspace.CurrentCamera.CameraSubject = head
+            end)
+            
+            -- Position player at shop item
+            hrp.CFrame = head.CFrame * CFrame.new(0, -5, 0)
+            
+            -- Click the detector
+            clickFunction(detector)
+        end)
+        
+        -- Check if tool appeared
+        if getMaskTool() then
+            success = true
+            break
         end
+        
+        -- Timeout check
+        if (tick() - startTime) >= timeout then
+            break
+        end
+    until getMaskTool()
+    
+    -- Restore camera
+    pcall(function()
+        if originalCameraSubject then
+            Workspace.CurrentCamera.CameraSubject = originalCameraSubject
+        elseif humanoid then
+            Workspace.CurrentCamera.CameraSubject = humanoid
+        end
+    end)
+    
+    -- Return to original position
+    pcall(function()
+        hrp.CFrame = originalCFrame
     end)
     
     local finalTool = getMaskTool()
@@ -2288,10 +2505,17 @@ local function stopAutokill(reason)
     end
     if reason then
         API.sendChat(reason)
+        print("[AutoKill] Stopped: " .. reason)
+    else
+        print("[AutoKill] Stopped")
     end
 end
 
 local function stopGautokill(reason)
+    if not gautokillState.active and not gautokillState.connection then
+        return
+    end
+    
     gautokillState.active = false
     
     if gautokillState.connection then
@@ -2327,6 +2551,9 @@ local function stopGautokill(reason)
     end
     if reason then
         API.sendChat(reason)
+        print("[GAutoKill] Stopped: " .. reason)
+    else
+        print("[GAutoKill] Stopped")
     end
 end
 
@@ -2613,6 +2840,21 @@ API.Summon = function(...)
         return originalSummonFunction(...)
     end
 end
+
+local function wrapBaseCommandWithAutoReset(commandName)
+    if API.Commands and type(API.Commands[commandName]) == "function" then
+        local original = API.Commands[commandName]
+        API.Commands[commandName] = function(...)
+            stopAutokill("Auto modes cancelled by '" .. commandName .. "'")
+            stopGautokill("Auto modes cancelled by '" .. commandName .. "'")
+            return original(...)
+        end
+    end
+end
+
+wrapBaseCommandWithAutoReset("summon")
+wrapBaseCommandWithAutoReset("stop")
+wrapBaseCommandWithAutoReset("vanish")
 
 -- Auto-activate AMask if configured
 if DahoodMainConfig.Automask == true and not amaskActive then
