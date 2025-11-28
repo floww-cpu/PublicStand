@@ -2852,21 +2852,18 @@ local RS = game:GetService("RunService")
 local pl = game.Players.LocalPlayer
 
 RS.Stepped:Connect(function()
-    local cfg = getgenv().SocietyStandConfig.Dahood.Main
-    if cfg and cfg.AntiStomp and ok and mainEvent then
+    local DahoodMainConfig = getgenv().SocietyStandConfig.Dahood.Main 
+    if DahoodMainConfig and DahoodMainConfig.AntiStomp then
         pcall(function()
             local hum = getLocalHumanoid()
             local K = KO(pl)
             local isKO = K and typeof(K.Value) == "boolean" and K.Value
-
             if not isDead(pl) and not isKO and hum and hum.Health < 60 then
-                mainEvent:FireServer("ResetNew")
-                getHumanoid(pl):ChangeState("Dead")
+                hum.Health = 0
             end
         end)
     end
 end)
-
 
 
 API.Create("stando", function(args)
