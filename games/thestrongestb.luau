@@ -1291,7 +1291,7 @@ API.Create("unguard", function()
     API.sendChat("Stopped guarding.")
 end)
 
-local SentryEnabled = false"]
+local SentryEnabled = false
 local SentryConnections = {}
 local SentryPlayerConnections = {}
 local SentryLastAttackTime = {}
