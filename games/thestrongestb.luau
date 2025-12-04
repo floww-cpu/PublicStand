@@ -123,6 +123,11 @@ local function clearAttackState()
     if Stand.AttackDeathConn then Stand.AttackDeathConn:Disconnect() Stand.AttackDeathConn = nil end
     Stand.Attack = false
     Stand.Attacking = false
+    
+    -- Return to following the owner after attack is cleared
+    if API then
+        API.currentFollowTarget = API.ownerPlayer
+    end
 end
 
 local MoveCooldowns = {0, 0, 0, 0}
@@ -365,8 +370,10 @@ end)
 API.Create("attack", function(args)
     if Stand.Attack then
         clearAttackState()
-        API.Stand.Following = false
-        API.currentFollowTarget = nil
+        
+        -- Reset to following the owner
+        API.Stand.Following = true
+        API.currentFollowTarget = API.ownerPlayer
         API.Stop()
         API.sendChat("Stopped attacking.")
         return
@@ -402,16 +409,13 @@ API.Create("attack", function(args)
     end
 
     Stand.Summoned = true
-    Stand.Following = false
+    Stand.Following = true
     Stand.Attack = true
     Stand.Attacking = true  
     API.Summon()
     
-    if API.Commands and API.Commands["frame"] then
-        API.Commands["frame"]({target.Name})
-    else
-        API.currentFollowTarget = target
-    end
+    -- Set the follow target to the attack target
+    API.currentFollowTarget = target
 
     Stand.AttackDeathConn = humanoid.Died:Connect(function()
         clearAttackState()
@@ -457,10 +461,13 @@ end)
 API.Create("unattack", function()
     clearAttackState()
     clearMimicState()
-    API.Stand.Following = false
-    API.currentFollowTarget = nil
+    
+    -- Reset to following the owner
+    API.Stand.Following = true
+    API.currentFollowTarget = API.ownerPlayer
     API.Stop()
     API.Summon()
+    API.sendChat("Stopped attacking and returned to following owner.")
 end)
 
 
