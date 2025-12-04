@@ -1,4 +1,4 @@
-local requiredFields = {"Stand", "Create", "Stop", "sendChat", "getPlayer", "ownerPlayer"}
+local requiredFields = {"Stand", "Create", "Stop", "sendChat", "getPlayer", "ownerPlayer", "currentFollowTarget"}
 local function isAPIReady()
     local api = getgenv().SocietyStandAPI
     if not api then return false end
