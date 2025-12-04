@@ -166,6 +166,11 @@ local function clearMimicState()
     MimicConnections = {}
     clearMimicCharacterConnections()
     resetMimicCooldowns()
+    
+    -- Reset API flag when mimic state is cleared
+    if API then
+        API.MimicEnabled = false
+    end
 end
 
 local Movesets = {
@@ -722,6 +727,7 @@ end
 API.Create("mimic", function(args)
     if MimicEnabled then
         clearMimicState()
+        API.MimicEnabled = false  -- Expose to API
         API.sendChat("Mimic stopped.")
         return
     end
@@ -741,12 +747,14 @@ API.Create("mimic", function(args)
 
     MimicTarget = target
     MimicEnabled = true
+    API.MimicEnabled = true  -- Expose to API for positioning logic
 
     Stand.Summoned = true
     API.Summon()
 
     if not setupMimicForCharacter(target.Character) then
         clearMimicState()
+        API.MimicEnabled = false  -- Reset on failure
         API.sendChat("Failed to attach mimic to " .. target.Name .. ".")
         return
     end
@@ -766,6 +774,7 @@ API.Create("mimic", function(args)
     table.insert(MimicConnections, target:GetPropertyChangedSignal("Parent"):Connect(function()
         if target.Parent == nil and MimicEnabled then
             clearMimicState()
+            API.MimicEnabled = false  -- Reset when target leaves
             API.sendChat("Mimic stopped - target left the game.")
         end
     end))
