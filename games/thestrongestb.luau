@@ -990,9 +990,23 @@ local SentryEnabled = false
 local SentryConnections = {}
 local SentryPlayerConnections = {}
 local SentryLastAttackTime = {}
+local SentryCurrentTarget = nil
+local SentryAttackConn = nil
+
+local function clearSentryAttack()
+    if SentryAttackConn then
+        SentryAttackConn:Disconnect()
+        SentryAttackConn = nil
+    end
+    SentryCurrentTarget = nil
+    Stand.Attack = false
+    Stand.Attacking = false
+end
 
 local function clearSentryState()
     SentryEnabled = false
+    clearSentryAttack()
+    
     for _, conn in ipairs(SentryConnections) do
         if conn then conn:Disconnect() end
     end
@@ -1006,7 +1020,6 @@ local function clearSentryState()
     SentryPlayerConnections = {}
     SentryLastAttackTime = {}
     
-    Stand.Attacking = false
     if API.ownerPlayer then
         API.currentFollowTarget = API.ownerPlayer
         if API.Commands and API.Commands["frame"] then
@@ -1057,33 +1070,68 @@ local function distanceTo(player)
     return (playerHRP.Position - ownerHRP.Position).Magnitude
 end
 
-local function performSentrySwing(target)
-    local prevAttack = Stand.Attack
+local function startSentryAttack(target)
+    if SentryCurrentTarget == target and SentryAttackConn then
+        return
+    end
+    
+    clearSentryAttack()
+    
+    if not target or not target.Character then return end
+    
+    local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
+    local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
+    if not targetHRP or not humanoid then return end
+    
+    SentryCurrentTarget = target
     Stand.Attack = true
+    Stand.Attacking = true
     
-    local availableSlots = getAvailableSlots()
-    local swung = false
+    API.currentFollowTarget = target
+    if API.Commands and API.Commands["frame"] then
+        pcall(function() API.Commands["frame"]({target.Name}) end)
+    end
     
-    if #availableSlots > 0 then
-        for _, slotNumber in ipairs(availableSlots) do
-            local toolName = slotToToolName[slotNumber]
-            local tool = getToolByName(toolName)
-            if tool then
-                swung = tryFireTool(tool, toolName) or swung
-                task.wait(0.05)
-                if swung then break end
+    SentryAttackConn = RunService.Heartbeat:Connect(function()
+        if not Stand.Attack or not SentryCurrentTarget or not SentryCurrentTarget.Character then
+            clearSentryAttack()
+            return
+        end
+        
+        local tHRP = SentryCurrentTarget.Character:FindFirstChild("HumanoidRootPart")
+        if not tHRP then
+            clearSentryAttack()
+            return
+        end
+        
+        if API.currentFollowTarget ~= SentryCurrentTarget then
+            API.currentFollowTarget = SentryCurrentTarget
+        end
+        
+        local availableSlots = getAvailableSlots()
+        local usedTool = false
+        
+        if #availableSlots > 0 then
+            for _, slotNumber in ipairs(availableSlots) do
+                if not Stand.Attack then break end
+                local tool = getToolByName(slotToToolName[slotNumber])
+                if tool then
+                    Stand.Attacking = true
+                    tryFireTool(tool, slotToToolName[slotNumber])
+                    usedTool = true
+                    task.wait(0.5)
+                end
             end
         end
-    end
-    
-    if not swung then
-        for i = 1, 2 do
-            if doM1() then break end
-            task.wait(0.05)
+        
+        if not usedTool then
+            for i = 1, 3 do
+                if not Stand.Attack then break end
+                doM1()
+                task.wait(0.1)
+            end
         end
-    end
-    
-    Stand.Attack = prevAttack
+    end)
 end
 
 API.Create("sentry", function()
@@ -1126,36 +1174,46 @@ API.Create("sentry", function()
         local now = os.clock()
         local attackTimeout = 0.5
         
-        for userId, lastAttackTime in pairs(SentryLastAttackTime) do
-            local player = Players:GetPlayerByUserId(userId)
-            if player and player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
-                local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
-                if playerHRP then
-                    local dist = distanceTo(player)
-                    
-                    if dist <= 7 and (now - lastAttackTime) < attackTimeout then
-                        Stand.Attacking = true
-                        API.currentFollowTarget = player
-                        if API.Commands and API.Commands["frame"] then
-                            pcall(function() API.Commands["frame"]({player.Name}) end)
-                        end
-                        
-                        performSentrySwing(player)
-                        task.wait(0.2)
-                    end
-                end
-            else
-                SentryLastAttackTime[userId] = nil
-                if SentryPlayerConnections[userId] then
-                    for _, conn in ipairs(SentryPlayerConnections[userId]) do
-                        if conn then conn:Disconnect() end
-                    end
-                    SentryPlayerConnections[userId] = nil
+        if SentryCurrentTarget then
+            local humanoid = SentryCurrentTarget.Character and SentryCurrentTarget.Character:FindFirstChildOfClass("Humanoid")
+            local dist = distanceTo(SentryCurrentTarget)
+            local lastAttackTime = SentryLastAttackTime[SentryCurrentTarget.UserId] or 0
+            
+            if not humanoid or humanoid.Health <= 0 or dist > 10 or (now - lastAttackTime) >= attackTimeout then
+                clearSentryAttack()
+                API.currentFollowTarget = API.ownerPlayer
+                if API.Commands and API.Commands["frame"] then
+                    pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
                 end
             end
         end
         
-        if not Stand.Attacking then
+        if not SentryCurrentTarget then
+            for userId, lastAttackTime in pairs(SentryLastAttackTime) do
+                local player = Players:GetPlayerByUserId(userId)
+                if player and player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
+                    local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
+                    if playerHRP then
+                        local dist = distanceTo(player)
+                        
+                        if dist <= 7 and (now - lastAttackTime) < attackTimeout then
+                            startSentryAttack(player)
+                            break
+                        end
+                    end
+                else
+                    SentryLastAttackTime[userId] = nil
+                    if SentryPlayerConnections[userId] then
+                        for _, conn in ipairs(SentryPlayerConnections[userId]) do
+                            if conn then conn:Disconnect() end
+                        end
+                        SentryPlayerConnections[userId] = nil
+                    end
+                end
+            end
+        end
+        
+        if not SentryCurrentTarget then
             API.currentFollowTarget = API.ownerPlayer
             if API.Commands and API.Commands["frame"] then
                 pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
