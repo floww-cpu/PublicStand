@@ -126,17 +126,46 @@ local function clearAttackState()
 end
 
 local MoveCooldowns = {0, 0, 0, 0}
+
+local function resetMimicCooldowns()
+    for i = 1, 4 do
+        MoveCooldowns[i] = 0
+    end
+end
+
+local function markMoveCooldown(slotIndex, duration)
+    MoveCooldowns[slotIndex] = os.clock() + duration
+end
+
+local function isMoveOnCooldown(slotIndex)
+    return (MoveCooldowns[slotIndex] or 0) > os.clock()
+end
+
 local MimicEnabled = false
 local MimicTarget = nil
 local MimicConnections = {}
+local MimicCharacterConnections = {}
+
+local function disconnectConnections(list)
+    for _, conn in ipairs(list) do
+        if conn then
+            conn:Disconnect()
+        end
+    end
+end
+
+local function clearMimicCharacterConnections()
+    disconnectConnections(MimicCharacterConnections)
+    MimicCharacterConnections = {}
+end
 
 local function clearMimicState()
     MimicEnabled = false
     MimicTarget = nil
-    for _, conn in ipairs(MimicConnections) do
-        if conn then conn:Disconnect() end
-    end
+    disconnectConnections(MimicConnections)
     MimicConnections = {}
+    clearMimicCharacterConnections()
+    resetMimicCooldowns()
 end
 
 local Movesets = {
@@ -212,6 +241,24 @@ local MovesList = {
     {"Whirlwind Drop", 17857788598, 15, 3, "Whirlwind Drop"},
     {"Head First", 18179181663, 20, 4, "Head First"},
 }
+
+local MovesBySlot = {
+    [1] = {},
+    [2] = {},
+    [3] = {},
+    [4] = {}
+}
+local MovesByAnimationId = {}
+
+for _, move in ipairs(MovesList) do
+    local slot = move[4]
+    MovesBySlot[slot] = MovesBySlot[slot] or {}
+    table.insert(MovesBySlot[slot], move)
+
+    local animationIdStr = tostring(move[2])
+    MovesByAnimationId[animationIdStr] = MovesByAnimationId[animationIdStr] or {}
+    table.insert(MovesByAnimationId[animationIdStr], move)
+end
 
 local function detectToolsAndClass()
     local bp = LocalPlayer:FindFirstChild("Backpack")
@@ -585,71 +632,144 @@ API.Create("trashcan", function(args)
     
 end)
 
+local function mimicFireTool(tool, toolName)
+    if not tool then return false end
+    local previousAttack, previousAttacking = Stand.Attack, Stand.Attacking
+    Stand.Attack = true
+    Stand.Attacking = true
+    local success = tryFireTool(tool, toolName)
+    Stand.Attack = previousAttack
+    Stand.Attacking = previousAttacking
+    return success
+end
+
+local function mimicFireSlot(slotIndex)
+    local slotMoves = MovesBySlot[slotIndex]
+    if not slotMoves then return end
+    for _, move in ipairs(slotMoves) do
+        local tool = getToolByName(move[5])
+        if tool and mimicFireTool(tool, move[5]) then
+            break
+        end
+    end
+end
+
+local function getAnimationIdString(animationTrack)
+    if not animationTrack then
+        return nil
+    end
+    local animation = animationTrack.Animation
+    if not animation then
+        return nil
+    end
+    local animationId = animation.AnimationId
+    if type(animationId) ~= "string" then
+        return nil
+    end
+    return animationId:match("(%d+)$")
+end
+
+local function setupMimicForCharacter(character)
+    if not character then
+        return false
+    end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 3)
+    if not humanoid then
+        return false
+    end
+
+    clearMimicCharacterConnections()
+    resetMimicCooldowns()
+
+    table.insert(MimicCharacterConnections, humanoid.AnimationPlayed:Connect(function(animationTrack)
+        local animIdStr = getAnimationIdString(animationTrack)
+        if not animIdStr then
+            return
+        end
+
+        local matchingMoves = MovesByAnimationId[animIdStr]
+        if not matchingMoves then
+            return
+        end
+
+        for _, move in ipairs(matchingMoves) do
+            markMoveCooldown(move[4], move[3])
+        end
+    end))
+
+    for _, move in ipairs(MovesList) do
+        local attributeName = "Holding" .. string.gsub(move[1], " ", "")
+        local signal = character:GetAttributeChangedSignal(attributeName):Connect(function()
+            if not MimicEnabled or not MimicTarget then
+                return
+            end
+            if MimicTarget.Character ~= character then
+                return
+            end
+
+            local isHolding = character:GetAttribute(attributeName)
+            if isHolding and isMoveOnCooldown(move[4]) then
+                mimicFireSlot(move[4])
+            end
+        end)
+        table.insert(MimicCharacterConnections, signal)
+    end
+
+    return true
+end
+
 API.Create("mimic", function(args)
     if MimicEnabled then
         clearMimicState()
         API.sendChat("Mimic stopped.")
         return
     end
-    
+
     local playerName = table.concat(args, " ")
     local target = (playerName == "" and API.ownerPlayer) or API.getPlayer(playerName)
-    
-    if not target or not target.Character then
+
+    if not target then
         API.sendChat("Target not found.")
         return
     end
-    
-    MimicTarget = target
-    MimicEnabled = true
-    
-    Stand.Summoned = true
-    API.Summon()
-    
-    local targetHuman = target.Character:FindFirstChildOfClass("Humanoid")
-    if not targetHuman then
-        MimicEnabled = false
+
+    if not target.Character then
+        API.sendChat("Target character not found.")
         return
     end
-    
-    table.insert(MimicConnections, targetHuman.AnimationPlayed:Connect(function(animationTrack)
-        if not MimicEnabled or not MimicTarget then return end
-        
-        for moveIndex, moveData in pairs(MovesList) do
-            if animationTrack.Animation.AnimationId == "rbxassetid://" .. moveData[2] then
-                MoveCooldowns[moveData[4]] = moveData[3]
-                task.wait(moveData[3])
-                MoveCooldowns[moveData[4]] = 0
-            end
-        end
-    end))
-    
-    for moveIndex, moveData in pairs(MovesList) do
-        local holdingAttribute = "Holding" .. string.gsub(moveData[1], " ", "")
-        target.Character:SetAttribute(holdingAttribute, false)
-        
-        table.insert(MimicConnections, target.Character:GetAttributeChangedSignal(holdingAttribute):Connect(function()
-            if not MimicEnabled or not MimicTarget or not MimicTarget.Character then return end
-            
-            if target.Character:GetAttribute(holdingAttribute) == true and MoveCooldowns[moveData[4]] ~= 0 then
-                for counterIndex, counterMove in pairs(MovesList) do
-                    if counterMove[4] == moveData[4] then
-                        local tool = getToolByName(counterMove[5])
-                        if tool and Stand.Attack then
-                            tryFireTool(tool, counterMove[5])
-                        end
-                    end
-                end
-            end
-        end))
+
+    MimicTarget = target
+    MimicEnabled = true
+
+    Stand.Summoned = true
+    API.Summon()
+
+    if not setupMimicForCharacter(target.Character) then
+        clearMimicState()
+        API.sendChat("Failed to attach mimic to " .. target.Name .. ".")
+        return
     end
-    
-    table.insert(MimicConnections, target.CharacterAdded:Connect(function(newChar)
-        if MimicEnabled then
-            MimicTarget = target
+
+    table.insert(MimicConnections, target.CharacterAdded:Connect(function(newCharacter)
+        if not MimicEnabled or MimicTarget ~= target then
+            return
+        end
+
+        task.spawn(function()
+            if MimicEnabled and MimicTarget == target then
+                setupMimicForCharacter(newCharacter)
+            end
+        end)
+    end))
+
+    table.insert(MimicConnections, target:GetPropertyChangedSignal("Parent"):Connect(function()
+        if target.Parent == nil and MimicEnabled then
+            clearMimicState()
+            API.sendChat("Mimic stopped - target left the game.")
         end
     end))
-    
+
     API.sendChat("Mimicking " .. target.Name .. "! Use mimic again to stop.")
 end)
 
