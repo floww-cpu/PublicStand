@@ -274,6 +274,17 @@ for _, move in ipairs(MovesList) do
     table.insert(MovesByAnimationId[animationIdStr], move)
 end
 
+local function getAnimationIdString(animationTrack)
+    if not animationTrack then return nil end
+    local success, animationId = pcall(function()
+        return tostring(animationTrack.Animation.AnimationId):match("%d+")
+    end)
+    if success and animationId then
+        return animationId
+    end
+    return nil
+end
+
 local function detectToolsAndClass()
     local bp = LocalPlayer:FindFirstChild("Backpack")
     local char = LocalPlayer.Character
@@ -1280,14 +1291,14 @@ API.Create("unguard", function()
     API.sendChat("Stopped guarding.")
 end)
 
-["slotNumber])\n                if tool then\n                    Stand.Attacking = true\n                    tryFireTool(tool, slotToToolName[slotNumber])\n                    usedTool = true\n                    task.wait(0.5)\n                end\n            end\n        end\n\n        if not usedTool then\n            for i = 1, 3 do\n                if not AssistEnabled then break end\n                doM1()\n                task.wait(0.1)\n            end\n        end\n    end)\nend\n\nlocal function clearAssistState()\n    AssistEnabled = false\n    \n    for _, conn in ipairs(AssistConnections) do\n        if conn then conn:Disconnect() end\n    end\n    AssistConnections = {}\n    \n    for _, conn in ipairs(AssistOwnerConnections) do\n        if conn then conn:Disconnect() end\n    end\n    AssistOwnerConnections = {}\n    \n    AssistLastOwnerAttackTime = 0\n    \n    if API.ownerPlayer then\n        API.currentFollowTarget = API.ownerPlayer\n        if API.Commands and API.Commands[\"frame"], "then\n            pcall(function() API.Commands[\"frame"], {"API.ownerPlayer.Name": "end)\n        end\n    end\nend\n\nlocal function setupAssistForOwner()\n    if not API.ownerPlayer or not API.ownerPlayer.Character then return end\n    \n    local humanoid = API.ownerPlayer.Character:FindFirstChildOfClass(\"Humanoid", "if not humanoid then return end\n    \n    local conn = humanoid.AnimationPlayed:Connect(function(animationTrack)\n        if not AssistEnabled or not API.ownerPlayer.Character then return end\n        \n        local animIdStr = getAnimationIdString(animationTrack)\n        if animIdStr then\n            local matchingMoves = MovesByAnimationId[animIdStr]\n            if matchingMoves and #matchingMoves > 0 then\n                AssistLastOwnerAttackTime = os.clock()\n            end\n        end\n    end)\n    \n    table.insert(AssistOwnerConnections", "end\n\nlocal function distanceToPlayer(player)\n    if not player or not player.Character or not API.ownerPlayer or not API.ownerPlayer.Character then\n        return math.huge\n    end\n    local playerHRP = player.Character:FindFirstChild(\"HumanoidRootPart", "local ownerHRP = API.ownerPlayer.Character:FindFirstChild(\"HumanoidRootPart", "if not playerHRP or not ownerHRP then\n        return math.huge\n    end\n    return (playerHRP.Position - ownerHRP.Position).Magnitude\nend\n\nlocal function startAssistAttack(target)\n    if AssistCurrentTarget == target and AssistAttackConn then\n        return\n    end\n    \n    clearAssistAttack()\n    \n    if not target or not target.Character then return end\n    \n    local targetHRP = target.Character:FindFirstChild(\"HumanoidRootPart", "local humanoid = target.Character:FindFirstChildOfClass(\"Humanoid", "if not targetHRP or not humanoid then return end\n    \n    AssistCurrentTarget = target\n    Stand.Attack = true\n    Stand.Attacking = true\n    \n    API.currentFollowTarget = target\n    if API.Commands and API.Commands[\"frame"], "then\n        pcall(function() API.Commands[\"frame"], {"target.Name": "end)\n    end\n    \n    AssistAttackConn = RunService.Heartbeat:Connect(function()\n        if not AssistEnabled or not AssistCurrentTarget or not AssistCurrentTarget.Character then\n            clearAssistAttack()\n            return\n        end\n        \n        local tHRP = AssistCurrentTarget.Character:FindFirstChild(\"HumanoidRootPart", "if not tHRP then\n            clearAssistAttack()\n            return\n        end\n        \n        if API.currentFollowTarget ~= AssistCurrentTarget then\n            API.currentFollowTarget = AssistCurrentTarget\n        end\n        \n        local availableSlots = getAvailableSlots()\n        local usedTool = false\n        \n        if #availableSlots > 0 then\n            for _, slotNumber in ipairs(availableSlots) do\n                if not AssistEnabled then break end\n                local tool = getToolByName(slotToToolName[slotNumber])\n                if tool then\n                    Stand.Attacking = true\n                    tryFireTool(tool, slotToToolName[slotNumber])\n                    usedTool = true\n                    task.wait(0.5)\n                end\n            end\n        end\n        \n        if not usedTool then\n            for i = 1, 3 do\n                if not AssistEnabled then break end\n                doM1()\n                task.wait(0.1)\n            end\n        end\n    end)\nend\n\nlocal function clearAssistAttack()\n    if AssistAttackConn then\n        AssistAttackConn:Disconnect()\n        AssistAttackConn = nil\n    end\n    AssistCurrentTarget = nil\n    Stand.Attack = false\n    Stand.Attacking = false\nend\n\nAPI.Create(\"assist", "function()\n    if AssistEnabled then\n        clearAssistState()\n        API.sendChat(\"Assist stopped.\")\n        return\n    end\n    \n    if not API.ownerPlayer or not API.ownerPlayer.Character then\n        API.sendChat(\"Owner not available for assist.\")\n        return\n    end\n    \n    AssistEnabled = true\n    Stand.Attacking = false\n    Stand.Summoned = true\n    API.currentFollowTarget = API.ownerPlayer\n    if API.Commands and API.Commands[\"frame"], "then\n        pcall(function() API.Commands[\"frame"], {"API.ownerPlayer.Name": "end)\n    end\n    \n    setupAssistForOwner()\n    \n    table.insert(AssistConnections", "RunService.Heartbeat", "Connect(function()\n        if not AssistEnabled then return end\n        \n        if not API.ownerPlayer or not API.ownerPlayer.Character then\n            clearAssistState()\n            return\n        end\n        \n        local ownerHRP = API.ownerPlayer.Character:FindFirstChild(\"HumanoidRootPart", "if not ownerHRP then return end\n        \n        local now = os.clock()\n        \n        if AssistCurrentTarget then\n            if not AssistCurrentTarget.Parent then\n                clearAssistAttack()\n            else\n                local humanoid = AssistCurrentTarget.Character and AssistCurrentTarget.Character:FindFirstChildOfClass(\"Humanoid\", "if not humanoid or humanoid.Health <= 0 then\n                    clearAssistAttack()\n                end\n            end\n        end\n        \n        local nextThreat\n        local latestThreatTime = 0\n        \n        if (now - AssistLastOwnerAttackTime) < ASSIST_THREAT_WINDOW then\n            for _, player in ipairs(Players:GetPlayers()) do\n                if player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then\n                    local humanoid = player.Character:FindFirstChildOfClass(\"Humanoid\", "local playerHRP = player.Character:FindFirstChild(\"HumanoidRootPart\", "if humanoid and humanoid.Health > 0 and playerHRP then\n                        if distanceToPlayer(player) <= ASSIST_ATTACK_RANGE then\n                            if player ~= AssistCurrentTarget then\n                                nextThreat = player\n                                break\n                            end\n                        end\n                    end\n                end\n            end\n        end\n        \n        if nextThreat then\n            startAssistAttack(nextThreat)\n        end\n        \n        if not AssistCurrentTarget and not Stand.Attack then\n            API.currentFollowTarget = API.ownerPlayer\n            if API.Commands and API.Commands[\"frame"], "then\n                pcall(function() API.Commands[\"frame"], {"API.ownerPlayer.Name": "end)\n            end\n        end\n    end))\n    \n    table.insert(AssistConnections", "Players.PlayerAdded", "Connect(function(player)\n        if AssistEnabled and player ~= LocalPlayer and player ~= API.ownerPlayer then\n            task.wait(0.5)\n        end\n    end))\n    \n    API.sendChat(\"Assist activated! Will attack nearby enemies when you use abilities.\")\nend)\n\nAPI.Create(\"unassist", "function()\n    clearAssistState()\n    API.sendChat(\"Assist deactivated.\")\nend)\n\nlocal SentryEnabled = false"]
+local SentryEnabled = false"]
 local SentryConnections = {}
 local SentryPlayerConnections = {}
 local SentryLastAttackTime = {}
 local SentryCurrentTarget = nil
 local SentryAttackConn = nil
 local SENTRY_ATTACK_RANGE = 7
-local SENTRY_THREAT_WINDOW = 1
+local SENTRY_THREAT_WINDOW = 2
 
 local function clearSentryAttack()
     if SentryAttackConn then
@@ -1492,7 +1503,8 @@ API.Create("sentry", function()
         end
         
         local nextThreat
-        local latestThreatTime = 0
+        local latestThreatTime = -math.huge
+        local currentTargetThreatTime = -math.huge
         
         for userId, lastAttackTime in pairs(SentryLastAttackTime) do
             local player = Players:GetPlayerByUserId(userId)
@@ -1501,8 +1513,10 @@ API.Create("sentry", function()
                 local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
                 
                 if humanoid and humanoid.Health > 0 and playerHRP then
-                    if (now - lastAttackTime) < SENTRY_THREAT_WINDOW and distanceTo(player) <= SENTRY_ATTACK_RANGE then
-                        if player ~= SentryCurrentTarget and lastAttackTime > latestThreatTime then
+                    if (now - lastAttackTime) < SENTRY_THREAT_WINDOW * 2 and distanceTo(player) <= SENTRY_ATTACK_RANGE then
+                        if player == SentryCurrentTarget then
+                            currentTargetThreatTime = lastAttackTime
+                        elseif lastAttackTime > latestThreatTime then
                             latestThreatTime = lastAttackTime
                             nextThreat = player
                         end
@@ -1513,7 +1527,9 @@ API.Create("sentry", function()
             end
         end
         
-        if nextThreat then
+        if nextThreat and latestThreatTime > currentTargetThreatTime then
+            startSentryAttack(nextThreat)
+        elseif not SentryCurrentTarget and nextThreat then
             startSentryAttack(nextThreat)
         end
         
