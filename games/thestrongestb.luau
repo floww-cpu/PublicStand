@@ -655,12 +655,12 @@ local function mimicFireTool(tool, toolName)
      Stand.Attacking = true
      Stand.ManualControl = true
      
-     task.wait(0.3)
+     task.wait(1)
      
      Stand.MimicPhase = "firing"
      local success = tryFireTool(tool, toolName)
      
-     task.wait(0.1)
+     task.wait(2)
      
      Stand.MimicPhase = nil
      Stand.Attack = previousAttack
@@ -1010,6 +1010,8 @@ local SentryPlayerConnections = {}
 local SentryLastAttackTime = {}
 local SentryCurrentTarget = nil
 local SentryAttackConn = nil
+local SENTRY_ATTACK_RANGE = 7
+local SENTRY_THREAT_WINDOW = 1
 
 local function clearSentryAttack()
     if SentryAttackConn then
@@ -1086,6 +1088,17 @@ local function distanceTo(player)
         return math.huge
     end
     return (playerHRP.Position - ownerHRP.Position).Magnitude
+end
+
+local function removeSentryPlayer(userId)
+    SentryLastAttackTime[userId] = nil
+    local userConnections = SentryPlayerConnections[userId]
+    if userConnections then
+        for _, conn in ipairs(userConnections) do
+            if conn then conn:Disconnect() end
+        end
+    end
+    SentryPlayerConnections[userId] = nil
 end
 
 local function startSentryAttack(target)
@@ -1190,47 +1203,42 @@ API.Create("sentry", function()
         if not ownerHRP then return end
         
         local now = os.clock()
-        local attackTimeout = 0.5
         
         if SentryCurrentTarget then
-            local humanoid = SentryCurrentTarget.Character and SentryCurrentTarget.Character:FindFirstChildOfClass("Humanoid")
-            local dist = distanceTo(SentryCurrentTarget)
-            local lastAttackTime = SentryLastAttackTime[SentryCurrentTarget.UserId] or 0
-            
-            if not humanoid or humanoid.Health <= 0 or dist > 10 or (now - lastAttackTime) >= attackTimeout then
+            if not SentryCurrentTarget.Parent then
                 clearSentryAttack()
-                if not Stand.Attack then
-                    API.currentFollowTarget = API.ownerPlayer
-                    if API.Commands and API.Commands["frame"] then
-                        pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
-                    end
+            else
+                local humanoid = SentryCurrentTarget.Character and SentryCurrentTarget.Character:FindFirstChildOfClass("Humanoid")
+                if not humanoid or humanoid.Health <= 0 then
+                    clearSentryAttack()
                 end
             end
         end
         
-        if not SentryCurrentTarget then
-            for userId, lastAttackTime in pairs(SentryLastAttackTime) do
-                local player = Players:GetPlayerByUserId(userId)
-                if player and player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
-                    local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
-                    if playerHRP then
-                        local dist = distanceTo(player)
-                        
-                        if dist <= 7 and (now - lastAttackTime) < attackTimeout then
-                            startSentryAttack(player)
-                            break
+        local nextThreat
+        local latestThreatTime = 0
+        
+        for userId, lastAttackTime in pairs(SentryLastAttackTime) do
+            local player = Players:GetPlayerByUserId(userId)
+            if player and player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
+                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
+                
+                if humanoid and humanoid.Health > 0 and playerHRP then
+                    if (now - lastAttackTime) < SENTRY_THREAT_WINDOW and distanceTo(player) <= SENTRY_ATTACK_RANGE then
+                        if player ~= SentryCurrentTarget and lastAttackTime > latestThreatTime then
+                            latestThreatTime = lastAttackTime
+                            nextThreat = player
                         end
-                    end
-                else
-                    SentryLastAttackTime[userId] = nil
-                    if SentryPlayerConnections[userId] then
-                        for _, conn in ipairs(SentryPlayerConnections[userId]) do
-                            if conn then conn:Disconnect() end
-                        end
-                        SentryPlayerConnections[userId] = nil
                     end
                 end
+            else
+                removeSentryPlayer(userId)
             end
+        end
+        
+        if nextThreat then
+            startSentryAttack(nextThreat)
         end
         
         if not SentryCurrentTarget and not Stand.Attack then
