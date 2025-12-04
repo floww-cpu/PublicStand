@@ -649,13 +649,24 @@ local function mimicFireTool(tool, toolName)
      if not tool then return false end
      local previousAttack, previousAttacking = Stand.Attack, Stand.Attacking
      local previousManualControl = Stand.ManualControl
+     
+     Stand.MimicPhase = "up"
      Stand.Attack = true
      Stand.Attacking = true
      Stand.ManualControl = true
+     
+     task.wait(0.3)
+     
+     Stand.MimicPhase = "firing"
      local success = tryFireTool(tool, toolName)
+     
+     task.wait(0.1)
+     
+     Stand.MimicPhase = nil
      Stand.Attack = previousAttack
      Stand.Attacking = previousAttacking
      Stand.ManualControl = previousManualControl
+     
      return success
  end
 
@@ -1188,9 +1199,11 @@ API.Create("sentry", function()
             
             if not humanoid or humanoid.Health <= 0 or dist > 10 or (now - lastAttackTime) >= attackTimeout then
                 clearSentryAttack()
-                API.currentFollowTarget = API.ownerPlayer
-                if API.Commands and API.Commands["frame"] then
-                    pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
+                if not Stand.Attack then
+                    API.currentFollowTarget = API.ownerPlayer
+                    if API.Commands and API.Commands["frame"] then
+                        pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
+                    end
                 end
             end
         end
@@ -1220,7 +1233,7 @@ API.Create("sentry", function()
             end
         end
         
-        if not SentryCurrentTarget then
+        if not SentryCurrentTarget and not Stand.Attack then
             API.currentFollowTarget = API.ownerPlayer
             if API.Commands and API.Commands["frame"] then
                 pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
