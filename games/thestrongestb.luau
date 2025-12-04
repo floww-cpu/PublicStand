@@ -986,6 +986,200 @@ API.Create("unguard", function()
     API.sendChat("Stopped guarding.")
 end)
 
+local SentryEnabled = false
+local SentryConnections = {}
+local SentryPlayerConnections = {}
+local SentryLastAttackTime = {}
+
+local function clearSentryState()
+    SentryEnabled = false
+    for _, conn in ipairs(SentryConnections) do
+        if conn then conn:Disconnect() end
+    end
+    SentryConnections = {}
+    
+    for _, conns in pairs(SentryPlayerConnections) do
+        for _, conn in ipairs(conns) do
+            if conn then conn:Disconnect() end
+        end
+    end
+    SentryPlayerConnections = {}
+    SentryLastAttackTime = {}
+    
+    Stand.Attacking = false
+    if API.ownerPlayer then
+        API.currentFollowTarget = API.ownerPlayer
+        if API.Commands and API.Commands["frame"] then
+            pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
+        end
+    end
+end
+
+local function setupSentryForPlayer(player)
+    if not player or not player.Character then return end
+    
+    local userId = player.UserId
+    if not SentryPlayerConnections[userId] then
+        SentryPlayerConnections[userId] = {}
+    end
+    
+    if not SentryLastAttackTime[userId] then
+        SentryLastAttackTime[userId] = 0
+    end
+    
+    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    local conn = humanoid.AnimationPlayed:Connect(function(animationTrack)
+        if not SentryEnabled or not player.Character then return end
+        
+        local animIdStr = getAnimationIdString(animationTrack)
+        if animIdStr then
+            local matchingMoves = MovesByAnimationId[animIdStr]
+            if matchingMoves and #matchingMoves > 0 then
+                SentryLastAttackTime[userId] = os.clock()
+            end
+        end
+    end)
+    
+    table.insert(SentryPlayerConnections[userId], conn)
+end
+
+local function distanceTo(player)
+    if not player or not player.Character or not API.ownerPlayer or not API.ownerPlayer.Character then
+        return math.huge
+    end
+    local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
+    local ownerHRP = API.ownerPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not playerHRP or not ownerHRP then
+        return math.huge
+    end
+    return (playerHRP.Position - ownerHRP.Position).Magnitude
+end
+
+local function performSentrySwing(target)
+    local prevAttack = Stand.Attack
+    Stand.Attack = true
+    
+    local availableSlots = getAvailableSlots()
+    local swung = false
+    
+    if #availableSlots > 0 then
+        for _, slotNumber in ipairs(availableSlots) do
+            local toolName = slotToToolName[slotNumber]
+            local tool = getToolByName(toolName)
+            if tool then
+                swung = tryFireTool(tool, toolName) or swung
+                task.wait(0.05)
+                if swung then break end
+            end
+        end
+    end
+    
+    if not swung then
+        for i = 1, 2 do
+            if doM1() then break end
+            task.wait(0.05)
+        end
+    end
+    
+    Stand.Attack = prevAttack
+end
+
+API.Create("sentry", function()
+    if SentryEnabled then
+        clearSentryState()
+        API.sendChat("Sentry stopped.")
+        return
+    end
+    
+    if not API.ownerPlayer or not API.ownerPlayer.Character then
+        API.sendChat("Owner not available for sentry.")
+        return
+    end
+    
+    SentryEnabled = true
+    Stand.Attacking = false
+    Stand.Summoned = true
+    API.currentFollowTarget = API.ownerPlayer
+    if API.Commands and API.Commands["frame"] then
+        pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
+    end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
+            setupSentryForPlayer(player)
+        end
+    end
+    
+    table.insert(SentryConnections, RunService.Heartbeat:Connect(function()
+        if not SentryEnabled then return end
+        
+        if not API.ownerPlayer or not API.ownerPlayer.Character then
+            clearSentryState()
+            return
+        end
+        
+        local ownerHRP = API.ownerPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not ownerHRP then return end
+        
+        local now = os.clock()
+        local attackTimeout = 0.5
+        
+        for userId, lastAttackTime in pairs(SentryLastAttackTime) do
+            local player = Players:GetPlayerByUserId(userId)
+            if player and player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
+                local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
+                if playerHRP then
+                    local dist = distanceTo(player)
+                    
+                    if dist <= 7 and (now - lastAttackTime) < attackTimeout then
+                        Stand.Attacking = true
+                        API.currentFollowTarget = player
+                        if API.Commands and API.Commands["frame"] then
+                            pcall(function() API.Commands["frame"]({player.Name}) end)
+                        end
+                        
+                        performSentrySwing(player)
+                        task.wait(0.2)
+                    end
+                end
+            else
+                SentryLastAttackTime[userId] = nil
+                if SentryPlayerConnections[userId] then
+                    for _, conn in ipairs(SentryPlayerConnections[userId]) do
+                        if conn then conn:Disconnect() end
+                    end
+                    SentryPlayerConnections[userId] = nil
+                end
+            end
+        end
+        
+        if not Stand.Attacking then
+            API.currentFollowTarget = API.ownerPlayer
+            if API.Commands and API.Commands["frame"] then
+                pcall(function() API.Commands["frame"]({API.ownerPlayer.Name}) end)
+            end
+        end
+    end))
+    
+    table.insert(SentryConnections, Players.PlayerAdded:Connect(function(player)
+        if SentryEnabled and player ~= LocalPlayer and player ~= API.ownerPlayer then
+            task.wait(0.5)
+            if player.Character then
+                setupSentryForPlayer(player)
+            end
+        end
+    end))
+    
+    API.sendChat("Sentry activated! Will protect owner from nearby attackers.")
+end)
+
+API.Create("unsentry", function()
+    clearSentryState()
+    API.sendChat("Sentry deactivated.")
+end)
+
 local AutoRoastEnabled = false
 
 local roastMessages = {
