@@ -638,15 +638,18 @@ API.Create("trashcan", function(args)
 end)
 
 local function mimicFireTool(tool, toolName)
-    if not tool then return false end
-    local previousAttack, previousAttacking = Stand.Attack, Stand.Attacking
-    Stand.Attack = true
-    Stand.Attacking = true
-    local success = tryFireTool(tool, toolName)
-    Stand.Attack = previousAttack
-    Stand.Attacking = previousAttacking
-    return success
-end
+     if not tool then return false end
+     local previousAttack, previousAttacking = Stand.Attack, Stand.Attacking
+     local previousManualControl = Stand.ManualControl
+     Stand.Attack = true
+     Stand.Attacking = true
+     Stand.ManualControl = true
+     local success = tryFireTool(tool, toolName)
+     Stand.Attack = previousAttack
+     Stand.Attacking = previousAttacking
+     Stand.ManualControl = previousManualControl
+     return success
+ end
 
 local function mimicFireSlot(slotIndex)
     local slotMoves = MovesBySlot[slotIndex]
