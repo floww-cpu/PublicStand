@@ -526,7 +526,7 @@ API.Create("auto", function(args)
 
     startAutoAttackLoop()
     API.sendChat("Auto attacking " .. target.Name .. "! Use 'auto' again to stop.")
-end)"]
+end)
 
 
 API.Create("assist", function()
@@ -1070,7 +1070,7 @@ local function distanceToPlayer(player)
     return (playerHRP.Position - ownerHRP.Position).Magnitude
 end
 
-local function clearAutoAttackState()"]
+local function clearAutoAttackState()
     if AutoAttackConn then
         AutoAttackConn:Disconnect()
         AutoAttackConn = nil
