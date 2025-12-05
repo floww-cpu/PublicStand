@@ -576,7 +576,7 @@ API.Create("assist", function()
         
         if (now - AssistLastOwnerAttackTime) < ASSIST_THREAT_WINDOW then
             for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
+                if player ~= LocalPlayer and player ~= API.ownerPlayer and not isWhitelisted(player) and player.Character then
                     local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
                     local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
                     if humanoid and humanoid.Health > 0 and playerHRP then
@@ -817,21 +817,6 @@ local function mimicFireSlot(slotIndex)
             break
         end
     end
-end
-
-local function getAnimationIdString(animationTrack)
-    if not animationTrack then
-        return nil
-    end
-    local animation = animationTrack.Animation
-    if not animation then
-        return nil
-    end
-    local animationId = animation.AnimationId
-    if type(animationId) ~= "string" then
-        return nil
-    end
-    return animationId:match("(%d+)$")
 end
 
 local function setupMimicForCharacter(character)
@@ -1583,7 +1568,7 @@ API.Create("sentry", function()
     end
     
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
+        if player ~= LocalPlayer and player ~= API.ownerPlayer and not isWhitelisted(player) and player.Character then
             setupSentryForPlayer(player)
         end
     end
@@ -1618,7 +1603,7 @@ API.Create("sentry", function()
         
         for userId, lastAttackTime in pairs(SentryLastAttackTime) do
             local player = Players:GetPlayerByUserId(userId)
-            if player and player ~= LocalPlayer and player ~= API.ownerPlayer and player.Character then
+            if player and player ~= LocalPlayer and player ~= API.ownerPlayer and not isWhitelisted(player) and player.Character then
                 local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
                 local playerHRP = player.Character:FindFirstChild("HumanoidRootPart")
                 
@@ -1652,7 +1637,7 @@ API.Create("sentry", function()
     end))
     
     table.insert(SentryConnections, Players.PlayerAdded:Connect(function(player)
-        if SentryEnabled and player ~= LocalPlayer and player ~= API.ownerPlayer then
+        if SentryEnabled and player ~= LocalPlayer and player ~= API.ownerPlayer and not isWhitelisted(player) then
             task.wait(0.5)
             if player.Character then
                 setupSentryForPlayer(player)
