@@ -766,20 +766,24 @@ local function trashAttack(target)
      end
 
      leftClick()
-     task.wait(1.5)
+           task.wait(1.5)
 
-      myHRP = myHRP()
-      if myHRP and targetHRP then
-          local targetPos = targetHRP.Position
-          local direction = (targetPos - myHRP.Position).Unit
-          local throwPos = targetPos - direction * 8
+            -- Disable ManualControl before throwing to allow proper throwing motion
+            Stand.ManualControl = false
+            task.wait(0.1)
 
-          -- Teleport to throw position for instant attack
-          myHRP.CFrame = CFrame.new(throwPos, Vector3.new(targetPos.X, throwPos.Y, targetPos.Z))
-      end
-      task.wait(0.3)
+            myHRP = myHRP()
+            if myHRP and targetHRP then
+                local targetPos = targetHRP.Position
+                local direction = (targetPos - myHRP.Position).Unit
+                local throwPos = targetPos - direction * 8
 
-      leftClick()
+                -- Teleport to throw position for instant attack
+                myHRP.CFrame = CFrame.new(throwPos, Vector3.new(targetPos.X, throwPos.Y, targetPos.Z))
+            end
+            task.wait(0.3)
+
+            leftClick()
       task.wait(1.5)
 
       Stand.Attacking = wasAttacking
