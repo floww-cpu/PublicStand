@@ -956,7 +956,81 @@ local AssistLastOwnerAttackTime = 0
 local AssistCurrentTarget = nil
 local AssistAttackConn = nil
 local ASSIST_ATTACK_RANGE = 7
-local ASSIST_THREAT_WINDOW = 1
+local ASSIST_THREAT_WINDOW = 2
+
+local function clearAssistAttack()
+     if AssistAttackConn then
+         AssistAttackConn:Disconnect()
+         AssistAttackConn = nil
+     end
+     AssistCurrentTarget = nil
+     Stand.Attack = false
+     Stand.Attacking = false
+end
+
+local function startAssistAttack(target)
+     if AssistCurrentTarget == target and AssistAttackConn then
+         return
+     end
+     
+     clearAssistAttack()
+     
+     if not target or not target.Character then return end
+     
+     local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
+     local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
+     if not targetHRP or not humanoid then return end
+     
+     AssistCurrentTarget = target
+     Stand.Attack = true
+     Stand.Attacking = true
+     
+     API.currentFollowTarget = target
+     if API.Commands and API.Commands["frame"] then
+         pcall(function() API.Commands["frame"]({target.Name}) end)
+     end
+     
+     AssistAttackConn = RunService.Heartbeat:Connect(function()
+         if not Stand.Attack or not AssistCurrentTarget or not AssistCurrentTarget.Character then
+             clearAssistAttack()
+             return
+         end
+         
+         local tHRP = AssistCurrentTarget.Character:FindFirstChild("HumanoidRootPart")
+         if not tHRP then
+             clearAssistAttack()
+             return
+         end
+         
+         if API.currentFollowTarget ~= AssistCurrentTarget then
+             API.currentFollowTarget = AssistCurrentTarget
+         end
+         
+         local availableSlots = getAvailableSlots()
+         local usedTool = false
+         
+         if #availableSlots > 0 then
+             for _, slotNumber in ipairs(availableSlots) do
+                 if not Stand.Attack then break end
+                 local tool = getToolByName(slotToToolName[slotNumber])
+                 if tool then
+                     Stand.Attacking = true
+                     tryFireTool(tool, slotToToolName[slotNumber])
+                     usedTool = true
+                     task.wait(0.5)
+                 end
+             end
+         end
+         
+         if not usedTool then
+             for i = 1, 3 do
+                 if not Stand.Attack then break end
+                 doM1()
+                 task.wait(0.1)
+             end
+         end
+     end)
+end
 
 local function startAutoAttackLoop()
     if not AutoAttackTarget or not AutoAttackEnabled then return end
@@ -1038,24 +1112,42 @@ local function clearAssistState()
 end
 
 local function setupAssistForOwner()
-    if not API.ownerPlayer or not API.ownerPlayer.Character then return end
-    
-    local humanoid = API.ownerPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    local conn = humanoid.AnimationPlayed:Connect(function(animationTrack)
-        if not AssistEnabled or not API.ownerPlayer.Character then return end
-        
-        local animIdStr = getAnimationIdString(animationTrack)
-        if animIdStr then
-            local matchingMoves = MovesByAnimationId[animIdStr]
-            if matchingMoves and #matchingMoves > 0 then
-                AssistLastOwnerAttackTime = os.clock()
-            end
-        end
-    end)
-    
-    table.insert(AssistOwnerConnections, conn)
+     if not API.ownerPlayer or not API.ownerPlayer.Character then return end
+
+     local humanoid = API.ownerPlayer.Character:FindFirstChildOfClass("Humanoid")
+     if not humanoid then return end
+
+     local conn = humanoid.AnimationPlayed:Connect(function(animationTrack)
+         if not AssistEnabled or not API.ownerPlayer.Character then return end
+
+         local animIdStr = getAnimationIdString(animationTrack)
+         if animIdStr then
+             local matchingMoves = MovesByAnimationId[animIdStr]
+             if matchingMoves and #matchingMoves > 0 then
+                 AssistLastOwnerAttackTime = os.clock()
+             end
+         end
+     end)
+
+     table.insert(AssistOwnerConnections, conn)
+
+     -- Monitor for M1 attacks (M1ing accessory appears in workspace.Live.[player])
+     local m1CheckConn = RunService.Heartbeat:Connect(function()
+         if not AssistEnabled or not API.ownerPlayer or not API.ownerPlayer.Character then
+             if m1CheckConn then m1CheckConn:Disconnect() end
+             return
+         end
+
+         local live = workspace:FindFirstChild("Live")
+         if live then
+             local playerFolder = live:FindFirstChild(API.ownerPlayer.Name)
+             if playerFolder and playerFolder:FindFirstChild("M1ing") then
+                 AssistLastOwnerAttackTime = os.clock()
+             end
+         end
+     end)
+
+     table.insert(AssistOwnerConnections, m1CheckConn)
 end
 
 local function distanceToPlayer(player)
@@ -1336,33 +1428,51 @@ local function clearSentryState()
 end
 
 local function setupSentryForPlayer(player)
-    if not player or not player.Character then return end
-    
-    local userId = player.UserId
-    if not SentryPlayerConnections[userId] then
-        SentryPlayerConnections[userId] = {}
-    end
-    
-    if not SentryLastAttackTime[userId] then
-        SentryLastAttackTime[userId] = 0
-    end
-    
-    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    local conn = humanoid.AnimationPlayed:Connect(function(animationTrack)
-        if not SentryEnabled or not player.Character then return end
-        
-        local animIdStr = getAnimationIdString(animationTrack)
-        if animIdStr then
-            local matchingMoves = MovesByAnimationId[animIdStr]
-            if matchingMoves and #matchingMoves > 0 then
-                SentryLastAttackTime[userId] = os.clock()
-            end
-        end
-    end)
-    
-    table.insert(SentryPlayerConnections[userId], conn)
+     if not player or not player.Character then return end
+
+     local userId = player.UserId
+     if not SentryPlayerConnections[userId] then
+         SentryPlayerConnections[userId] = {}
+     end
+
+     if not SentryLastAttackTime[userId] then
+         SentryLastAttackTime[userId] = 0
+     end
+
+     local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+     if not humanoid then return end
+
+     local conn = humanoid.AnimationPlayed:Connect(function(animationTrack)
+         if not SentryEnabled or not player.Character then return end
+
+         local animIdStr = getAnimationIdString(animationTrack)
+         if animIdStr then
+             local matchingMoves = MovesByAnimationId[animIdStr]
+             if matchingMoves and #matchingMoves > 0 then
+                 SentryLastAttackTime[userId] = os.clock()
+             end
+         end
+     end)
+
+     table.insert(SentryPlayerConnections[userId], conn)
+
+     -- Monitor for M1 attacks (M1ing accessory appears in workspace.Live.[player])
+     local m1CheckConn = RunService.Heartbeat:Connect(function()
+         if not SentryEnabled or not player or not player.Character then
+             if m1CheckConn then m1CheckConn:Disconnect() end
+             return
+         end
+
+         local live = workspace:FindFirstChild("Live")
+         if live then
+             local playerFolder = live:FindFirstChild(player.Name)
+             if playerFolder and playerFolder:FindFirstChild("M1ing") then
+                 SentryLastAttackTime[userId] = os.clock()
+             end
+         end
+     end)
+
+     table.insert(SentryPlayerConnections[userId], m1CheckConn)
 end
 
 local function distanceTo(player)
