@@ -692,7 +692,6 @@ local function trashAttack(target)
      local originalTarget = API.currentFollowTarget
 
      -- Set up for trash attack
-     Stand.Attacking = true
      Stand.Following = false
      Stand.Summoned = true
      Stand.ManualControl = true
@@ -789,10 +788,6 @@ local function trashAttack(target)
      Stand.Summoned = wasSummoned
      Stand.ManualControl = wasManualControl
      API.currentFollowTarget = originalTarget
-
-     if wasAttacking then
-         Stand.Attacking = true
-     end
 end
 
 API.Create("trashcan", function(args)
