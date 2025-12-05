@@ -702,13 +702,26 @@ local function trashAttack(target)
      markTrashcanUsed(trashcan)
 
      local myHRP = myHRP()
-     if myHRP then
+     local char = LocalPlayer.Character
+     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+     if myHRP and humanoid then
          local trashcanPos = trashcanPart.Position
          local direction = (trashcanPos - myHRP.Position).Unit
-         local approachPos = trashcanPos - direction * 3
-         myHRP.CFrame = CFrame.new(approachPos, trashcanPos)
+         local approachPos = trashcanPos - direction * 2
+         
+         -- Use MoveTo to walk to the trashcan
+         humanoid:MoveTo(approachPos)
+         
+         -- Wait for character to get close or timeout
+         local startTime = os.clock()
+         while (myHRP.Position - approachPos).Magnitude > 3 and (os.clock() - startTime) < 3 do
+             task.wait(0.1)
+         end
+         
+         -- Orient towards trashcan
+         myHRP.CFrame = CFrame.new(myHRP.Position, Vector3.new(trashcanPos.X, myHRP.Position.Y, trashcanPos.Z))
      end
-     task.wait(0.5)
+     task.wait(0.3)
 
      if not trashcanStillExists(trashcan) then
          API.sendChat("Trashcan disappeared before we could pick it up!")
@@ -717,12 +730,20 @@ local function trashAttack(target)
              trashcan = newTrashcan
              trashcanPart = trashcan.PrimaryPart or trashcan:FindFirstChildWhichIsA("BasePart")
              myHRP = myHRP()
-             if trashcanPart and myHRP then
+             humanoid = char and char:FindFirstChildOfClass("Humanoid")
+             if trashcanPart and myHRP and humanoid then
                  local trashcanPos = trashcanPart.Position
                  local direction = (trashcanPos - myHRP.Position).Unit
-                 local approachPos = trashcanPos - direction * 3
-                 myHRP.CFrame = CFrame.new(approachPos, trashcanPos)
-                 task.wait(0.5)
+                 local approachPos = trashcanPos - direction * 2
+                 
+                 humanoid:MoveTo(approachPos)
+                 local startTime = os.clock()
+                 while (myHRP.Position - approachPos).Magnitude > 3 and (os.clock() - startTime) < 3 do
+                     task.wait(0.1)
+                 end
+                 
+                 myHRP.CFrame = CFrame.new(myHRP.Position, Vector3.new(trashcanPos.X, myHRP.Position.Y, trashcanPos.Z))
+                 task.wait(0.3)
                  markTrashcanUsed(trashcan)
              else
                  Stand.TrashAttacking = false
@@ -738,19 +759,52 @@ local function trashAttack(target)
      end
 
      leftClick()
-     task.wait(1.0)
+     task.wait(1.5)
+
+     -- Verify trashcan was picked up by checking if character has it
+     local char = LocalPlayer.Character
+     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+     local hasTrashcan = false
+     if char then
+         for _, child in ipairs(char:GetChildren()) do
+             if child:IsA("Tool") and child.Name:lower():find("trash") then
+                 hasTrashcan = true
+                 break
+             end
+         end
+     end
+     
+     if not hasTrashcan then
+         API.sendChat("Failed to pick up trashcan!")
+         Stand.TrashAttacking = false
+         Stand.ManualControl = wasManualControl
+         return
+     end
 
      myHRP = myHRP()
-     if myHRP and targetHRP then
+     if myHRP and targetHRP and humanoid then
          local targetPos = targetHRP.Position
          local direction = (targetPos - myHRP.Position).Unit
-         local throwPos = targetPos - direction * 5
-         myHRP.CFrame = CFrame.new(throwPos, targetPos)
+         local throwPos = targetPos - direction * 8
+         
+         -- Use Humanoid:MoveTo() instead of direct CFrame to maintain trashcan hold
+         humanoid:MoveTo(throwPos)
+         
+         -- Wait for character to reach position or timeout after 5 seconds
+         local startTime = os.clock()
+         while (myHRP.Position - throwPos).Magnitude > 5 and (os.clock() - startTime) < 5 do
+             task.wait(0.1)
+         end
+         
+         -- Orient towards target
+         if myHRP then
+             myHRP.CFrame = CFrame.new(myHRP.Position, Vector3.new(targetPos.X, myHRP.Position.Y, targetPos.Z))
+         end
      end
-     task.wait(0.5)
+     task.wait(0.3)
 
      leftClick()
-     task.wait(1.0)
+     task.wait(1.5)
 
      Stand.Attacking = wasAttacking
      Stand.Following = wasFollowing
