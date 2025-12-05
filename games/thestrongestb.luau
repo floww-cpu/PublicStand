@@ -691,7 +691,7 @@ local function trashAttack(target)
      local wasManualControl = Stand.ManualControl
      local originalTarget = API.currentFollowTarget
 
-     Stand.Attacking = false
+     Stand.Attacking = true
      Stand.Following = false
      Stand.Summoned = true
      Stand.ManualControl = true
