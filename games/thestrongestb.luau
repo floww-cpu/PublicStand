@@ -766,70 +766,7 @@ local function trashAttack(target)
      end
 
      leftClick()
-      task.wait(1.5)
-
-      -- Verify trashcan was picked up by checking if character or backpack has it
-      local char = LocalPlayer.Character
-      local backpack = LocalPlayer:FindFirstChild("Backpack")
-      local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-      local hasTrashcan = false
-      
-      -- Check character for trashcan tool
-      if char then
-          for _, child in ipairs(char:GetChildren()) do
-              if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
-                  hasTrashcan = true
-                  break
-              end
-          end
-      end
-      
-      -- Also check backpack if not found on character
-      if not hasTrashcan and backpack then
-          for _, child in ipairs(backpack:GetChildren()) do
-              if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
-                  hasTrashcan = true
-                  break
-              end
-          end
-      end
-      
-      -- Try one more time with a longer wait if not found
-      if not hasTrashcan then
-          task.wait(1)
-          
-          -- Re-check character
-          if char then
-              for _, child in ipairs(char:GetChildren()) do
-                  if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
-                      hasTrashcan = true
-                      break
-                  end
-              end
-          end
-          
-          -- Re-check backpack
-          if not hasTrashcan and backpack then
-              for _, child in ipairs(backpack:GetChildren()) do
-                  if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
-                      hasTrashcan = true
-                      break
-                  end
-              end
-          end
-      end
-      
-      if not hasTrashcan then
-          API.sendChat("Failed to pick up trashcan!")
-          -- Restore all original state variables when pickup fails
-          Stand.TrashAttacking = false
-          Stand.Attacking = wasAttacking
-          Stand.Following = wasFollowing
-          Stand.Summoned = wasSummoned
-          Stand.ManualControl = wasManualControl
-          API.currentFollowTarget = originalTarget
-          return
-      end
+     task.wait(1.5)
 
       myHRP = myHRP()
       if myHRP and targetHRP then
