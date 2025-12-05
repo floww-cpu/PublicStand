@@ -621,28 +621,34 @@ local function leftClick()
 end
 
 local function getClosestTrashcan()
-    local trashFolder = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Trash")
-    if not trashFolder then return nil end
+     local trashFolder = workspace:FindFirstChild("Trash")
+     if not trashFolder then
+         local mapFolder = workspace:FindFirstChild("Map")
+         if mapFolder then
+             trashFolder = mapFolder:FindFirstChild("Trash")
+         end
+     end
+     if not trashFolder then return nil end
 
-    local myPos = myHRP() and myHRP().Position
-    if not myPos then return nil end
+     local myPos = myHRP() and myHRP().Position
+     if not myPos then return nil end
 
-    local closest, dist = nil, math.huge
-    for _, obj in ipairs(trashFolder:GetChildren()) do
-        if obj.Name == "Trashcan" and obj:IsDescendantOf(workspace) then
-            if not recentlyUsedTrashcans[obj] then
-                local primaryPart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-                if primaryPart then
-                    local d = (primaryPart.Position - myPos).Magnitude
-                    if d < dist then
-                        closest, dist = obj, d
-                    end
-                end
-            end
-        end
-    end
-    return closest
-end
+     local closest, dist = nil, math.huge
+     for _, obj in ipairs(trashFolder:GetChildren()) do
+         if obj.Name == "Trashcan" and obj:IsDescendantOf(workspace) then
+             if not recentlyUsedTrashcans[obj] then
+                 local primaryPart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                 if primaryPart then
+                     local d = (primaryPart.Position - myPos).Magnitude
+                     if d < dist then
+                         closest, dist = obj, d
+                     end
+                 end
+             end
+         end
+     end
+     return closest
+ end
 
 local function trashcanStillExists(trashcan)
     return trashcan and trashcan:IsDescendantOf(workspace) and trashcan.Name == "Trashcan"
