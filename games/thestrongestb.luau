@@ -699,11 +699,16 @@ local function trashAttack(target)
      Stand.TrashAttacking = true
 
      if not trashcanStillExists(trashcan) then
-         API.sendChat("Trashcan disappeared before we could reach it!")
-         Stand.TrashAttacking = false
-         Stand.ManualControl = wasManualControl
-         return
-     end
+               API.sendChat("Trashcan disappeared before we could reach it!")
+               -- Restore all original state variables
+               Stand.TrashAttacking = false
+               Stand.Attacking = wasAttacking
+               Stand.Following = wasFollowing
+               Stand.Summoned = wasSummoned
+               Stand.ManualControl = wasManualControl
+               API.currentFollowTarget = originalTarget
+               return
+           end
 
      markTrashcanUsed(trashcan)
 
@@ -738,65 +743,118 @@ local function trashAttack(target)
                                task.wait(0.3)
                                markTrashcanUsed(trashcan)
              else
-                 Stand.TrashAttacking = false
-                 Stand.ManualControl = wasManualControl
-                 return
-             end
+                               -- Restore all original state variables
+                               Stand.TrashAttacking = false
+                               Stand.Attacking = wasAttacking
+                               Stand.Following = wasFollowing
+                               Stand.Summoned = wasSummoned
+                               Stand.ManualControl = wasManualControl
+                               API.currentFollowTarget = originalTarget
+                               return
+                           end
          else
-             API.sendChat("No trashcans available right now.")
-             Stand.TrashAttacking = false
-             Stand.ManualControl = wasManualControl
-             return
-         end
+                       API.sendChat("No trashcans available right now.")
+                       -- Restore all original state variables
+                       Stand.TrashAttacking = false
+                       Stand.Attacking = wasAttacking
+                       Stand.Following = wasFollowing
+                       Stand.Summoned = wasSummoned
+                       Stand.ManualControl = wasManualControl
+                       API.currentFollowTarget = originalTarget
+                       return
+                   end
      end
 
      leftClick()
-     task.wait(1.5)
+      task.wait(1.5)
 
-     -- Verify trashcan was picked up by checking if character has it
-     local char = LocalPlayer.Character
-     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-     local hasTrashcan = false
-     if char then
-         for _, child in ipairs(char:GetChildren()) do
-             if child:IsA("Tool") and child.Name:lower():find("trash") then
-                 hasTrashcan = true
-                 break
-             end
-         end
-     end
-     
-     if not hasTrashcan then
-         API.sendChat("Failed to pick up trashcan!")
-         Stand.TrashAttacking = false
-         Stand.ManualControl = wasManualControl
-         return
-     end
+      -- Verify trashcan was picked up by checking if character or backpack has it
+      local char = LocalPlayer.Character
+      local backpack = LocalPlayer:FindFirstChild("Backpack")
+      local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+      local hasTrashcan = false
+      
+      -- Check character for trashcan tool
+      if char then
+          for _, child in ipairs(char:GetChildren()) do
+              if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
+                  hasTrashcan = true
+                  break
+              end
+          end
+      end
+      
+      -- Also check backpack if not found on character
+      if not hasTrashcan and backpack then
+          for _, child in ipairs(backpack:GetChildren()) do
+              if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
+                  hasTrashcan = true
+                  break
+              end
+          end
+      end
+      
+      -- Try one more time with a longer wait if not found
+      if not hasTrashcan then
+          task.wait(1)
+          
+          -- Re-check character
+          if char then
+              for _, child in ipairs(char:GetChildren()) do
+                  if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
+                      hasTrashcan = true
+                      break
+                  end
+              end
+          end
+          
+          -- Re-check backpack
+          if not hasTrashcan and backpack then
+              for _, child in ipairs(backpack:GetChildren()) do
+                  if child:IsA("Tool") and (child.Name:lower():find("trash") or child.Name == "Trashcan") then
+                      hasTrashcan = true
+                      break
+                  end
+              end
+          end
+      end
+      
+      if not hasTrashcan then
+          API.sendChat("Failed to pick up trashcan!")
+          -- Restore all original state variables when pickup fails
+          Stand.TrashAttacking = false
+          Stand.Attacking = wasAttacking
+          Stand.Following = wasFollowing
+          Stand.Summoned = wasSummoned
+          Stand.ManualControl = wasManualControl
+          API.currentFollowTarget = originalTarget
+          return
+      end
 
-     myHRP = myHRP()
-           if myHRP and targetHRP then
-               local targetPos = targetHRP.Position
-               local direction = (targetPos - myHRP.Position).Unit
-               local throwPos = targetPos - direction * 8
+      myHRP = myHRP()
+      if myHRP and targetHRP then
+          local targetPos = targetHRP.Position
+          local direction = (targetPos - myHRP.Position).Unit
+          local throwPos = targetPos - direction * 8
 
-               -- Teleport to throw position for instant attack
-               myHRP.CFrame = CFrame.new(throwPos, Vector3.new(targetPos.X, throwPos.Y, targetPos.Z))
-           end
-     task.wait(0.3)
+          -- Teleport to throw position for instant attack
+          myHRP.CFrame = CFrame.new(throwPos, Vector3.new(targetPos.X, throwPos.Y, targetPos.Z))
+      end
+      task.wait(0.3)
 
-     leftClick()
-     task.wait(1.5)
+      leftClick()
+      task.wait(1.5)
 
-     Stand.Attacking = wasAttacking
-     Stand.Following = wasFollowing
-     Stand.Summoned = wasSummoned
-     Stand.ManualControl = wasManualControl
-     API.currentFollowTarget = originalTarget
-     Stand.TrashAttacking = false
+      Stand.Attacking = wasAttacking
+      Stand.Following = wasFollowing
+      Stand.Summoned = wasSummoned
+      Stand.ManualControl = wasManualControl
+      API.currentFollowTarget = originalTarget
+      Stand.TrashAttacking = false
 
-     if wasAttacking then
-         Stand.Attacking = true
-     end
+      if wasAttacking then
+          Stand.Attacking = true
+      end
 end
 
 API.Create("trashcan", function(args)
