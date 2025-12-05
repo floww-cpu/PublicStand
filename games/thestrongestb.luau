@@ -691,111 +691,108 @@ local function trashAttack(target)
      local wasManualControl = Stand.ManualControl
      local originalTarget = API.currentFollowTarget
 
+     -- Set up for trash attack
      Stand.Attacking = true
      Stand.Following = false
      Stand.Summoned = true
      Stand.ManualControl = true
-     API.currentFollowTarget = nil
+     API.currentFollowTarget = target
      Stand.TrashAttacking = true
 
-     if not trashcanStillExists(trashcan) then
-               API.sendChat("Trashcan disappeared before we could reach it!")
-               -- Restore all original state variables
-               Stand.TrashAttacking = false
-               Stand.Attacking = wasAttacking
-               Stand.Following = wasFollowing
-               Stand.Summoned = wasSummoned
-               Stand.ManualControl = wasManualControl
-               API.currentFollowTarget = originalTarget
-               return
-           end
+     -- Create a heartbeat connection to maintain our positioning during the attack
+     local positionMaintainer
+     local maintainPosition = false
+     local desiredCFrame
 
-     markTrashcanUsed(trashcan)
+     local function startPositionMaintenance()
+         maintainPosition = true
+         positionMaintainer = game:GetService("RunService").Heartbeat:Connect(function()
+             if maintainPosition and desiredCFrame and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                 LocalPlayer.Character.HumanoidRootPart.CFrame = desiredCFrame
+             end
+         end)
+     end
 
-     local myHRP = myHRP()
-           local char = LocalPlayer.Character
-           local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-           if myHRP then
-               local trashcanPos = trashcanPart.Position
-               local direction = (trashcanPos - myHRP.Position).Unit
-               local approachPos = trashcanPos - direction * 2
+     local function stopPositionMaintenance()
+         maintainPosition = false
+         if positionMaintainer then
+             positionMaintainer:Disconnect()
+             positionMaintainer = nil
+         end
+     end
 
-               -- Teleport to approach position for instant pickup
-               myHRP.CFrame = CFrame.new(approachPos, Vector3.new(trashcanPos.X, approachPos.Y, trashcanPos.Z))
-           end
+     -- Phase 1: Move to trashcan and pick it up
+     local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+     if not myHRP then
+         -- Restore state and exit
+         stopPositionMaintenance()
+         Stand.TrashAttacking = false
+         Stand.Attacking = wasAttacking
+         Stand.Following = wasFollowing
+         Stand.Summoned = wasSummoned
+         Stand.ManualControl = wasManualControl
+         API.currentFollowTarget = originalTarget
+         return
+     end
+
+     -- Move to trashcan position (approach from 3 studs away)
+     local trashcanPos = trashcanPart.Position
+     local direction = (trashcanPos - myHRP.Position).Unit
+     local approachPos = trashcanPos - direction * 3
+
+     desiredCFrame = CFrame.new(approachPos, Vector3.new(trashcanPos.X, approachPos.Y, trashcanPos.Z))
+     startPositionMaintenance()
      task.wait(0.3)
 
      if not trashcanStillExists(trashcan) then
          API.sendChat("Trashcan disappeared before we could pick it up!")
-         local newTrashcan = getClosestTrashcan()
-         if newTrashcan then
-             trashcan = newTrashcan
-             trashcanPart = trashcan.PrimaryPart or trashcan:FindFirstChildWhichIsA("BasePart")
-             myHRP = myHRP()
-             humanoid = char and char:FindFirstChildOfClass("Humanoid")
-             if trashcanPart and myHRP then
-                               local trashcanPos = trashcanPart.Position
-                               local direction = (trashcanPos - myHRP.Position).Unit
-                               local approachPos = trashcanPos - direction * 2
-
-                               -- Teleport to approach position for instant pickup
-                               myHRP.CFrame = CFrame.new(approachPos, Vector3.new(trashcanPos.X, approachPos.Y, trashcanPos.Z))
-                               task.wait(0.3)
-                               markTrashcanUsed(trashcan)
-             else
-                               -- Restore all original state variables
-                               Stand.TrashAttacking = false
-                               Stand.Attacking = wasAttacking
-                               Stand.Following = wasFollowing
-                               Stand.Summoned = wasSummoned
-                               Stand.ManualControl = wasManualControl
-                               API.currentFollowTarget = originalTarget
-                               return
-                           end
-         else
-                       API.sendChat("No trashcans available right now.")
-                       -- Restore all original state variables
-                       Stand.TrashAttacking = false
-                       Stand.Attacking = wasAttacking
-                       Stand.Following = wasFollowing
-                       Stand.Summoned = wasSummoned
-                       Stand.ManualControl = wasManualControl
-                       API.currentFollowTarget = originalTarget
-                       return
-                   end
+         -- Restore state
+         stopPositionMaintenance()
+         Stand.TrashAttacking = false
+         Stand.Attacking = wasAttacking
+         Stand.Following = wasFollowing
+         Stand.Summoned = wasSummoned
+         Stand.ManualControl = wasManualControl
+         API.currentFollowTarget = originalTarget
+         return
      end
 
+     markTrashcanUsed(trashcan)
+
+     -- Pick up trashcan
      leftClick()
-           task.wait(1.5)
+     task.wait(1.5)
 
-            -- Disable ManualControl before throwing to allow proper throwing motion
-            Stand.ManualControl = false
-            task.wait(0.1)
+     -- Phase 2: Move to throwing position (20 studs behind target) and throw
+     myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+     if myHRP and targetHRP then
+         local targetPos = targetHRP.Position
+         local targetLookVector = targetHRP.CFrame.LookVector
+         local throwPos = targetPos - targetLookVector * 20  -- 20 studs behind target
 
-            myHRP = myHRP()
-            if myHRP and targetHRP then
-                local targetPos = targetHRP.Position
-                local direction = (targetPos - myHRP.Position).Unit
-                local throwPos = targetPos - direction * 8
+         -- Move to throwing position and face target
+         desiredCFrame = CFrame.new(throwPos, targetPos)
+     end
+     task.wait(0.3)
 
-                -- Teleport to throw position for instant attack
-                myHRP.CFrame = CFrame.new(throwPos, Vector3.new(targetPos.X, throwPos.Y, targetPos.Z))
-            end
-            task.wait(0.3)
+     -- Throw trashcan
+     leftClick()
+     task.wait(1.5)
 
-            leftClick()
-      task.wait(1.5)
+     -- Clean up
+     stopPositionMaintenance()
 
-      Stand.Attacking = wasAttacking
-      Stand.Following = wasFollowing
-      Stand.Summoned = wasSummoned
-      Stand.ManualControl = wasManualControl
-      API.currentFollowTarget = originalTarget
-      Stand.TrashAttacking = false
+     -- Restore original state
+     Stand.TrashAttacking = false
+     Stand.Attacking = wasAttacking
+     Stand.Following = wasFollowing
+     Stand.Summoned = wasSummoned
+     Stand.ManualControl = wasManualControl
+     API.currentFollowTarget = originalTarget
 
-      if wasAttacking then
-          Stand.Attacking = true
-      end
+     if wasAttacking then
+         Stand.Attacking = true
+     end
 end
 
 API.Create("trashcan", function(args)
