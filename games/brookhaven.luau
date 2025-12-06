@@ -30,7 +30,7 @@ local function myHRP() return hrpOf(LocalPlayer.Character) end
 local BringingTarget = false
 
 local function clickGuiButton(guiPath)
-    local success, err = pcall(function()
+    local success, result = pcall(function()
         local element = guiPath()
         if element then
             local pos = element.AbsolutePosition
@@ -46,13 +46,32 @@ local function clickGuiButton(guiPath)
         end
         return false
     end)
-    return success and not err
+
+    return success and result == true
+end
+
+local function hasShoppingCart()
+    local backpack = LocalPlayer:FindFirstChild("Backpack") or LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack and backpack:FindFirstChild("ShoppingCart") then
+        return true
+    end
+    
+    local character = LocalPlayer.Character
+    if character and character:FindFirstChild("ShoppingCart") then
+        return true
+    end
+    
+    return false
 end
 
 local function equipCart()
     local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
     if not PlayerGui then
         return false
+    end
+
+    if hasShoppingCart() then
+        return true
     end
     
     -- Click BackPack button
@@ -64,7 +83,7 @@ local function equipCart()
     end)
     
     if not button1Success then
-        return false
+        return hasShoppingCart()
     end
     
     task.wait(0.5)
@@ -78,8 +97,23 @@ local function equipCart()
             :WaitForChild("ScrollingFrame", 2)
             :WaitForChild("ShoppingCart", 2)
     end)
+
+    if hasShoppingCart() then
+        return true
+    end
     
-    return button2Success
+    if not button2Success then
+        return hasShoppingCart()
+    end
+
+    for _ = 1, 30 do
+        if hasShoppingCart() then
+            return true
+        end
+        task.wait(0.1)
+    end
+    
+    return false
 end
 
 local function bringTarget(target)
