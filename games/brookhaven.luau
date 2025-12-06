@@ -29,6 +29,13 @@ local function myHRP() return hrpOf(LocalPlayer.Character) end
 
 local BringingTarget = false
 
+local function unequipCart()
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum:UnequipTools() end)
+    end
+end
+
 local function clickGuiButton(guiPath)
     local success, result = pcall(function()
         local element = guiPath()
@@ -70,7 +77,9 @@ local function equipCart()
         return false
     end
 
-    if hasShoppingCart() then
+    -- Check if cart is already equipped
+    local character = LocalPlayer.Character
+    if character and character:FindFirstChild("ShoppingCart") then
         return true
     end
     
@@ -83,12 +92,12 @@ local function equipCart()
     end)
     
     if not button1Success then
-        return hasShoppingCart()
+        return false
     end
     
     task.wait(0.5)
     
-    -- Click ShoppingCart button
+    -- Click ShoppingCart button in catalog
     local button2Success = clickGuiButton(function()
         return PlayerGui:WaitForChild("NoResetGUIHandler", 2)
             :WaitForChild("MainToolMenuFilter", 2)
@@ -97,23 +106,41 @@ local function equipCart()
             :WaitForChild("ScrollingFrame", 2)
             :WaitForChild("ShoppingCart", 2)
     end)
-
-    if hasShoppingCart() then
-        return true
-    end
     
     if not button2Success then
-        return hasShoppingCart()
+        return false
     end
 
-    for _ = 1, 30 do
+    task.wait(0.5)
+    
+    -- Wait for cart to appear in backpack
+    for _ = 1, 20 do
         if hasShoppingCart() then
-            return true
+            break
         end
         task.wait(0.1)
     end
     
-    return false
+    -- Now equip the cart from backpack
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    local cart = nil
+    
+    if backpack then
+        cart = backpack:FindFirstChild("ShoppingCart")
+    end
+    
+    if not cart then
+        return false
+    end
+    
+    local hum = character and character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function() hum:EquipTool(cart) end)
+        task.wait(0.2)
+    end
+    
+    -- Verify cart is now equipped
+    return character and character:FindFirstChild("ShoppingCart") ~= nil
 end
 
 local function bringTarget(target)
@@ -193,6 +220,10 @@ local function bringTarget(target)
             API.sendChat("Failed to capture target in cart.")
         end
     end
+    
+    -- Unequip the cart
+    unequipCart()
+    task.wait(0.5)
     
     -- Restore state
     BringingTarget = false
