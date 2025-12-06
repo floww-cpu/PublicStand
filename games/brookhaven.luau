@@ -216,38 +216,12 @@ local function fastTeleport(targetCFrame)
         return false
     end
     
-    -- Create a manual control connection to maintain position
-    local manualConn
-    local startTime = tick()
-    local startCFrame = myCharHRP.CFrame
-    local duration = 0.8 -- Duration for smooth transition
-    
-    manualConn = RunService.Heartbeat:Connect(function(deltaTime)
-        if not myChar or not myChar:IsDescendantOf(workspace) then
-            if manualConn then manualConn:Disconnect() end
-            return
-        end
-        
-        local currentHRP = myChar:FindFirstChild("HumanoidRootPart")
-        if currentHRP then
-            local elapsed = tick() - startTime
-            
-            if elapsed >= duration then
-                -- Final position
-                currentHRP.CFrame = targetCFrame
-                if manualConn then manualConn:Disconnect() end
-            else
-                -- Smooth interpolation
-                local alpha = elapsed / duration
-                -- Use ease-in-out for smooth acceleration/deceleration
-                alpha = alpha * alpha * (3.0 - 2.0 * alpha)
-                currentHRP.CFrame = startCFrame:Lerp(targetCFrame, alpha)
-            end
-        end
-    end)
-    
-    -- Set initial position
+    -- Use direct CFrame assignment instead of tweening
+    -- Set position immediately to avoid interpolation issues
     myCharHRP.CFrame = targetCFrame
+    
+    -- Small delay to ensure position is set
+    task.wait(0.1)
     
     return true
 end
@@ -357,7 +331,7 @@ local function bringTarget(target)
         return
     end
     
-    task.wait(1.0) -- Wait for smooth teleport to complete
+    task.wait(2.0) -- Increased wait time for target pickup
     
     -- Strafe around target for 1 second while holding cart to ensure pickup
     strafeAroundTarget(targetHRP, 1.0)
@@ -376,7 +350,7 @@ local function bringTarget(target)
         if not fastTeleport(CFrame.new(returnPos, ownerPos)) then
             API.sendChat("Failed to teleport back!")
         else
-            task.wait(1.0)
+            task.wait(2.0) -- Increased wait time for owner pickup
             API.sendChat("Target delivered!")
         end
     else
@@ -444,7 +418,7 @@ local function gotoTarget(target)
     if not fastTeleport(CFrame.new(nearPos, targetPos)) then
         API.sendChat("Failed to teleport!")
     else
-        task.wait(1.0)
+        task.wait(2.0) -- Increased wait time for owner pickup
         
         -- Strafe around target for 1 second to ensure proper positioning
         strafeAroundTarget(targetHRP, 1.0)
