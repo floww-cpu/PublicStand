@@ -36,6 +36,24 @@ local function unequipCart()
     end
 end
 
+local function clearExistingCart()
+    local backpack = LocalPlayer:FindFirstChild("Backpack") or LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack then
+        local cart = backpack:FindFirstChild("ShoppingCart")
+        if cart then
+            cart:Destroy()
+        end
+    end
+    
+    local character = LocalPlayer.Character
+    if character then
+        local cart = character:FindFirstChild("ShoppingCart")
+        if cart then
+            cart:Destroy()
+        end
+    end
+end
+
 local function clickGuiButton(guiPath)
     local success, result = pcall(function()
         local element = guiPath()
@@ -82,6 +100,10 @@ local function equipCart()
     if character and character:FindFirstChild("ShoppingCart") then
         return true
     end
+    
+    -- Clear any existing cart first
+    clearExistingCart()
+    task.wait(0.1)
     
     -- Click BackPack button
     local button1Success = clickGuiButton(function()
@@ -172,19 +194,7 @@ local function bringTarget(target)
     Stand.Following = false
     Stand.ManualControl = true
     
-    -- Equip the cart
-    if not equipCart() then
-        API.sendChat("Failed to equip cart!")
-        -- Restore state
-        BringingTarget = false
-        Stand.Following = wasFollowing
-        Stand.ManualControl = wasManualControl
-        return
-    end
-    
-    task.wait(1)
-    
-    -- Teleport behind target
+    -- Teleport behind target first (without cart)
     local myChar = LocalPlayer.Character
     local myCharHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
     
@@ -196,8 +206,16 @@ local function bringTarget(target)
         myCharHRP.CFrame = CFrame.new(behindPos, targetPos)
         task.wait(0.5)
         
-        -- Equip cart again to make them sit
-        equipCart()
+        -- Now equip the cart at the target location
+        if not equipCart() then
+            API.sendChat("Failed to equip cart!")
+            -- Restore state
+            BringingTarget = false
+            Stand.Following = wasFollowing
+            Stand.ManualControl = wasManualControl
+            return
+        end
+        
         task.wait(1.5)
         
         -- Check if target is now seated
@@ -234,6 +252,69 @@ local function bringTarget(target)
     API.currentFollowTarget = originalTarget
 end
 
+local function gotoTarget(target)
+    if not target or not target.Character then
+        API.sendChat("Target not found!")
+        return
+    end
+    
+    local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then
+        API.sendChat("Target has no HumanoidRootPart!")
+        return
+    end
+    
+    -- Save state
+    local wasAttacking = Stand.Attacking
+    local wasFollowing = Stand.Following
+    local wasSummoned = Stand.Summoned
+    local wasManualControl = Stand.ManualControl
+    local originalTarget = API.currentFollowTarget
+    
+    BringingTarget = true
+    Stand.Following = false
+    Stand.ManualControl = true
+    
+    -- Equip the cart first (this makes owner sit)
+    if not equipCart() then
+        API.sendChat("Failed to equip cart!")
+        -- Restore state
+        BringingTarget = false
+        Stand.Following = wasFollowing
+        Stand.ManualControl = wasManualControl
+        return
+    end
+    
+    task.wait(1)
+    
+    -- Teleport to target
+    local myChar = LocalPlayer.Character
+    local myCharHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    
+    if myCharHRP and targetHRP then
+        local targetPos = targetHRP.Position
+        local targetLookVector = targetHRP.CFrame.LookVector
+        local nearPos = targetPos + targetLookVector * 5
+        
+        myCharHRP.CFrame = CFrame.new(nearPos, targetPos)
+        task.wait(0.5)
+        
+        API.sendChat("Teleported to target!")
+    end
+    
+    -- Unequip the cart
+    unequipCart()
+    task.wait(0.5)
+    
+    -- Restore state
+    BringingTarget = false
+    Stand.Attacking = wasAttacking
+    Stand.Following = wasFollowing
+    Stand.Summoned = wasSummoned
+    Stand.ManualControl = wasManualControl
+    API.currentFollowTarget = originalTarget
+end
+
 API.Create("bring", function(args)
     if BringingTarget then
         API.sendChat("Already bringing someone!")
@@ -255,6 +336,30 @@ API.Create("bring", function(args)
     
     task.spawn(function()
         bringTarget(target)
+    end)
+end)
+
+API.Create("goto", function(args)
+    if BringingTarget then
+        API.sendChat("Already teleporting!")
+        return
+    end
+    
+    local playerName = table.concat(args, " ")
+    local target = (playerName == "" and API.ownerPlayer) or API.getPlayer(playerName)
+    
+    if not target then
+        API.sendChat("Target not found.")
+        return
+    end
+    
+    if target == API.ownerPlayer then
+        API.sendChat("Cannot goto yourself!")
+        return
+    end
+    
+    task.spawn(function()
+        gotoTarget(target)
     end)
 end)
 
