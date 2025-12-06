@@ -101,10 +101,6 @@ local function equipCart()
         return true
     end
     
-    -- Clear any existing cart first
-    clearExistingCart()
-    task.wait(0.1)
-    
     -- State 1: Check if cart is already in backpack
     local backpack = LocalPlayer:FindFirstChild("Backpack") or LocalPlayer:FindFirstChildOfClass("Backpack")
     if backpack and backpack:FindFirstChild("ShoppingCart") then
@@ -332,7 +328,22 @@ local function bringTarget(target)
     Stand.Following = false
     Stand.ManualControl = true
     
-    -- Fast teleport behind target first (without cart)
+    -- Check if we need to equip cart (if not already equipped)
+    local cartAlreadyEquipped = hasShoppingCart()
+    if not cartAlreadyEquipped then
+        if not equipCart() then
+            API.sendChat("Failed to equip cart!")
+            -- Restore state
+            BringingTarget = false
+            Stand.Following = wasFollowing
+            Stand.ManualControl = wasManualControl
+            return
+        end
+    end
+    
+    task.wait(0.5)
+    
+    -- Fast teleport behind target with cart
     local targetPos = targetHRP.Position
     local targetLookVector = targetHRP.CFrame.LookVector
     local behindPos = targetPos - targetLookVector * 3
@@ -348,20 +359,8 @@ local function bringTarget(target)
     
     task.wait(1.0) -- Wait for smooth teleport to complete
     
-    -- Strafe around target for 1 second to ensure cart pickup
+    -- Strafe around target for 1 second while holding cart to ensure pickup
     strafeAroundTarget(targetHRP, 1.0)
-    task.wait(1.2)
-    
-    -- Now equip the cart at the target location
-    if not equipCart() then
-        API.sendChat("Failed to equip cart!")
-        -- Restore state
-        BringingTarget = false
-        Stand.Following = wasFollowing
-        Stand.ManualControl = wasManualControl
-        return
-    end
-    
     task.wait(1.2)
     
     -- Check if target is now seated
@@ -384,9 +383,11 @@ local function bringTarget(target)
         API.sendChat("Failed to capture target in cart.")
     end
     
-    -- Unequip the cart
-    unequipCart()
-    task.wait(0.3)
+    -- Only unequip the cart if we equipped it (not if it was already equipped)
+    if not cartAlreadyEquipped then
+        unequipCart()
+        task.wait(0.3)
+    end
     
     -- Restore state
     BringingTarget = false
@@ -420,14 +421,17 @@ local function gotoTarget(target)
     Stand.Following = false
     Stand.ManualControl = true
     
-    -- Equip the cart first (this makes owner sit)
-    if not equipCart() then
-        API.sendChat("Failed to equip cart!")
-        -- Restore state
-        BringingTarget = false
-        Stand.Following = wasFollowing
-        Stand.ManualControl = wasManualControl
-        return
+    -- Check if we need to equip cart (if not already equipped)
+    local cartAlreadyEquipped = hasShoppingCart()
+    if not cartAlreadyEquipped then
+        if not equipCart() then
+            API.sendChat("Failed to equip cart!")
+            -- Restore state
+            BringingTarget = false
+            Stand.Following = wasFollowing
+            Stand.ManualControl = wasManualControl
+            return
+        end
     end
     
     task.wait(1.0)
@@ -449,9 +453,11 @@ local function gotoTarget(target)
         API.sendChat("Teleported to target!")
     end
     
-    -- Unequip the cart
-    unequipCart()
-    task.wait(0.3)
+    -- Only unequip the cart if we equipped it (not if it was already equipped)
+    if not cartAlreadyEquipped then
+        unequipCart()
+        task.wait(0.3)
+    end
     
     -- Restore state
     BringingTarget = false
