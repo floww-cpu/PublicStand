@@ -105,21 +105,47 @@ local function equipCart()
     clearExistingCart()
     task.wait(0.1)
     
-    -- Click BackPack button
-    local button1Success = clickGuiButton(function()
-        return PlayerGui:WaitForChild("MainGUIHandler", 2)
-            :WaitForChild("MainButtons", 2)
-            :WaitForChild("Buttons", 2)
-            :WaitForChild("BackPack", 2)
-    end)
-    
-    if not button1Success then
-        return false
+    -- State 1: Check if cart is already in backpack
+    local backpack = LocalPlayer:FindFirstChild("Backpack") or LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack and backpack:FindFirstChild("ShoppingCart") then
+        local cart = backpack:FindFirstChild("ShoppingCart")
+        local hum = character and character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            pcall(function() hum:EquipTool(cart) end)
+            task.wait(0.2)
+            return character and character:FindFirstChild("ShoppingCart") ~= nil
+        end
     end
     
-    task.wait(0.5)
+    -- State 2: Check if menu is already open and has cart available
+    local cartInMenu = false
+    pcall(function()
+        local catalog = PlayerGui:FindFirstChild("NoResetGUIHandler")
+            :WaitForChild("MainToolMenuFilter", 1)
+            :WaitForChild("Catalog", 1)
+            :WaitForChild("Container", 1)
+            :WaitForChild("ScrollingFrame", 1)
+            :WaitForChild("ShoppingCart", 1)
+        cartInMenu = catalog ~= nil
+    end)
     
-    -- Click ShoppingCart button in catalog
+    -- State 3: If menu is closed, open it first
+    if not cartInMenu then
+        local button1Success = clickGuiButton(function()
+            return PlayerGui:WaitForChild("MainGUIHandler", 2)
+                :WaitForChild("MainButtons", 2)
+                :WaitForChild("Buttons", 2)
+                :WaitForChild("BackPack", 2)
+        end)
+        
+        if not button1Success then
+            return false
+        end
+        
+        task.wait(0.5)
+    end
+    
+    -- State 4: Click ShoppingCart button in catalog (whether menu was open or just opened)
     local button2Success = clickGuiButton(function()
         return PlayerGui:WaitForChild("NoResetGUIHandler", 2)
             :WaitForChild("MainToolMenuFilter", 2)
@@ -133,7 +159,7 @@ local function equipCart()
         return false
     end
 
-    task.wait(0.5)
+    task.wait(0.3)
     
     -- Wait for cart to appear in backpack
     for _ = 1, 20 do
@@ -144,9 +170,7 @@ local function equipCart()
     end
     
     -- Now equip the cart from backpack
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
     local cart = nil
-    
     if backpack then
         cart = backpack:FindFirstChild("ShoppingCart")
     end
@@ -163,6 +187,50 @@ local function equipCart()
     
     -- Verify cart is now equipped
     return character and character:FindFirstChild("ShoppingCart") ~= nil
+end
+
+local function fastTeleport(targetCFrame)
+    local myChar = LocalPlayer.Character
+    local myCharHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    
+    if not myCharHRP then
+        return false
+    end
+    
+    -- Create a manual control connection to maintain position
+    local manualConn
+    local startTime = tick()
+    local startCFrame = myCharHRP.CFrame
+    local duration = 0.8 -- Duration for smooth transition
+    
+    manualConn = RunService.Heartbeat:Connect(function(deltaTime)
+        if not myChar or not myChar:IsDescendantOf(workspace) then
+            if manualConn then manualConn:Disconnect() end
+            return
+        end
+        
+        local currentHRP = myChar:FindFirstChild("HumanoidRootPart")
+        if currentHRP then
+            local elapsed = tick() - startTime
+            
+            if elapsed >= duration then
+                -- Final position
+                currentHRP.CFrame = targetCFrame
+                if manualConn then manualConn:Disconnect() end
+            else
+                -- Smooth interpolation
+                local alpha = elapsed / duration
+                -- Use ease-in-out for smooth acceleration/deceleration
+                alpha = alpha * alpha * (3.0 - 2.0 * alpha)
+                currentHRP.CFrame = startCFrame:Lerp(targetCFrame, alpha)
+            end
+        end
+    end)
+    
+    -- Set initial position
+    myCharHRP.CFrame = targetCFrame
+    
+    return true
 end
 
 local function bringTarget(target)
@@ -194,54 +262,57 @@ local function bringTarget(target)
     Stand.Following = false
     Stand.ManualControl = true
     
-    -- Teleport behind target first (without cart)
-    local myChar = LocalPlayer.Character
-    local myCharHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    -- Fast teleport behind target first (without cart)
+    local targetPos = targetHRP.Position
+    local targetLookVector = targetHRP.CFrame.LookVector
+    local behindPos = targetPos - targetLookVector * 3
     
-    if myCharHRP and targetHRP then
-        local targetPos = targetHRP.Position
-        local targetLookVector = targetHRP.CFrame.LookVector
-        local behindPos = targetPos - targetLookVector * 3
+    if not fastTeleport(CFrame.new(behindPos, targetPos)) then
+        API.sendChat("Failed to teleport!")
+        -- Restore state
+        BringingTarget = false
+        Stand.Following = wasFollowing
+        Stand.ManualControl = wasManualControl
+        return
+    end
+    
+    task.wait(1.0) -- Wait for smooth teleport to complete
+    
+    -- Now equip the cart at the target location
+    if not equipCart() then
+        API.sendChat("Failed to equip cart!")
+        -- Restore state
+        BringingTarget = false
+        Stand.Following = wasFollowing
+        Stand.ManualControl = wasManualControl
+        return
+    end
+    
+    task.wait(1.2)
+    
+    -- Check if target is now seated
+    local targetHumanoid = target.Character:FindFirstChildOfClass("Humanoid")
+    if targetHumanoid and targetHumanoid.Sit then
+        API.sendChat("Target captured! Bringing to owner...")
         
-        myCharHRP.CFrame = CFrame.new(behindPos, targetPos)
-        task.wait(0.5)
+        -- Fast teleport back to owner
+        local ownerPos = ownerHRP.Position
+        local ownerLookVector = ownerHRP.CFrame.LookVector
+        local returnPos = ownerPos + ownerLookVector * 5
         
-        -- Now equip the cart at the target location
-        if not equipCart() then
-            API.sendChat("Failed to equip cart!")
-            -- Restore state
-            BringingTarget = false
-            Stand.Following = wasFollowing
-            Stand.ManualControl = wasManualControl
-            return
-        end
-        
-        task.wait(1.5)
-        
-        -- Check if target is now seated
-        local targetHumanoid = target.Character:FindFirstChildOfClass("Humanoid")
-        if targetHumanoid and targetHumanoid.Sit then
-            API.sendChat("Target captured! Bringing to owner...")
-            
-            -- Teleport back to owner
-            if myCharHRP and ownerHRP then
-                local ownerPos = ownerHRP.Position
-                local ownerLookVector = ownerHRP.CFrame.LookVector
-                local returnPos = ownerPos + ownerLookVector * 5
-                
-                myCharHRP.CFrame = CFrame.new(returnPos, ownerPos)
-                task.wait(0.5)
-                
-                API.sendChat("Target delivered!")
-            end
+        if not fastTeleport(CFrame.new(returnPos, ownerPos)) then
+            API.sendChat("Failed to teleport back!")
         else
-            API.sendChat("Failed to capture target in cart.")
+            task.wait(1.0)
+            API.sendChat("Target delivered!")
         end
+    else
+        API.sendChat("Failed to capture target in cart.")
     end
     
     -- Unequip the cart
     unequipCart()
-    task.wait(0.5)
+    task.wait(0.3)
     
     -- Restore state
     BringingTarget = false
@@ -285,26 +356,23 @@ local function gotoTarget(target)
         return
     end
     
-    task.wait(1)
+    task.wait(1.0)
     
-    -- Teleport to target
-    local myChar = LocalPlayer.Character
-    local myCharHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    -- Fast teleport to target
+    local targetPos = targetHRP.Position
+    local targetLookVector = targetHRP.CFrame.LookVector
+    local nearPos = targetPos + targetLookVector * 5
     
-    if myCharHRP and targetHRP then
-        local targetPos = targetHRP.Position
-        local targetLookVector = targetHRP.CFrame.LookVector
-        local nearPos = targetPos + targetLookVector * 5
-        
-        myCharHRP.CFrame = CFrame.new(nearPos, targetPos)
-        task.wait(0.5)
-        
+    if not fastTeleport(CFrame.new(nearPos, targetPos)) then
+        API.sendChat("Failed to teleport!")
+    else
+        task.wait(1.0)
         API.sendChat("Teleported to target!")
     end
     
     -- Unequip the cart
     unequipCart()
-    task.wait(0.5)
+    task.wait(0.3)
     
     -- Restore state
     BringingTarget = false
