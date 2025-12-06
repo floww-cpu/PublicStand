@@ -117,8 +117,17 @@ local function equipCart()
         end
     end
     
-    -- State 2: Check if menu is already open and has cart available
-    local cartInMenu = false
+    -- State 2: Check if main menu is already open
+    local mainMenuOpen = false
+    pcall(function()
+        local mainGUI = PlayerGui:FindFirstChild("MainGUIHandler")
+        if mainGUI and mainGUI:FindFirstChild("MainButtons") then
+            mainMenuOpen = true
+        end
+    end)
+    
+    -- State 3: Check if catalog menu is already open and has cart available
+    local catalogMenuOpen = false
     pcall(function()
         local catalog = PlayerGui:FindFirstChild("NoResetGUIHandler")
             :WaitForChild("MainToolMenuFilter", 1)
@@ -126,11 +135,11 @@ local function equipCart()
             :WaitForChild("Container", 1)
             :WaitForChild("ScrollingFrame", 1)
             :WaitForChild("ShoppingCart", 1)
-        cartInMenu = catalog ~= nil
+        catalogMenuOpen = catalog ~= nil
     end)
     
-    -- State 3: If menu is closed, open it first
-    if not cartInMenu then
+    -- State 4: If no menu is open, open main menu first
+    if not mainMenuOpen and not catalogMenuOpen then
         local button1Success = clickGuiButton(function()
             return PlayerGui:WaitForChild("MainGUIHandler", 2)
                 :WaitForChild("MainButtons", 2)
@@ -145,7 +154,21 @@ local function equipCart()
         task.wait(0.5)
     end
     
-    -- State 4: Click ShoppingCart button in catalog (whether menu was open or just opened)
+    -- State 5: If catalog is not open, try to open it
+    if not catalogMenuOpen then
+        local button1Success = clickGuiButton(function()
+            return PlayerGui:WaitForChild("MainGUIHandler", 2)
+                :WaitForChild("MainButtons", 2)
+                :WaitForChild("Buttons", 2)
+                :WaitForChild("BackPack", 2)
+        end)
+        
+        if button1Success then
+            task.wait(0.5)
+        end
+    end
+    
+    -- State 6: Click ShoppingCart button in catalog
     local button2Success = clickGuiButton(function()
         return PlayerGui:WaitForChild("NoResetGUIHandler", 2)
             :WaitForChild("MainToolMenuFilter", 2)
@@ -233,6 +256,53 @@ local function fastTeleport(targetCFrame)
     return true
 end
 
+local function strafeAroundTarget(targetHRP, duration)
+    local myChar = LocalPlayer.Character
+    local myCharHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    
+    if not myCharHRP or not targetHRP then
+        return false
+    end
+    
+    local startTime = tick()
+    local strafeConn
+    local radius = 4 -- Strafe radius
+    local speed = 2 -- Strafe speed
+    
+    strafeConn = RunService.Heartbeat:Connect(function(deltaTime)
+        if not myChar or not myChar:IsDescendantOf(workspace) then
+            if strafeConn then strafeConn:Disconnect() end
+            return
+        end
+        
+        local currentHRP = myChar:FindFirstChild("HumanoidRootPart")
+        if currentHRP then
+            local elapsed = tick() - startTime
+            
+            if elapsed >= duration then
+                if strafeConn then strafeConn:Disconnect() end
+                return
+            end
+            
+            -- Calculate circular strafe position
+            local angle = elapsed * speed * math.pi * 2 -- Full rotations
+            local offset = Vector3.new(
+                math.cos(angle) * radius,
+                0,
+                math.sin(angle) * radius
+            )
+            
+            local targetPos = targetHRP.Position
+            local strafePos = targetPos + offset
+            
+            -- Face the target while strafing
+            currentHRP.CFrame = CFrame.new(strafePos, targetPos)
+        end
+    end)
+    
+    return true
+end
+
 local function bringTarget(target)
     if not target or not target.Character then
         API.sendChat("Target not found!")
@@ -277,6 +347,10 @@ local function bringTarget(target)
     end
     
     task.wait(1.0) -- Wait for smooth teleport to complete
+    
+    -- Strafe around target for 1 second to ensure cart pickup
+    strafeAroundTarget(targetHRP, 1.0)
+    task.wait(1.2)
     
     -- Now equip the cart at the target location
     if not equipCart() then
@@ -358,7 +432,7 @@ local function gotoTarget(target)
     
     task.wait(1.0)
     
-    -- Fast teleport to target
+    -- Fast teleport near target
     local targetPos = targetHRP.Position
     local targetLookVector = targetHRP.CFrame.LookVector
     local nearPos = targetPos + targetLookVector * 5
@@ -367,6 +441,11 @@ local function gotoTarget(target)
         API.sendChat("Failed to teleport!")
     else
         task.wait(1.0)
+        
+        -- Strafe around target for 1 second to ensure proper positioning
+        strafeAroundTarget(targetHRP, 1.0)
+        task.wait(1.2)
+        
         API.sendChat("Teleported to target!")
     end
     
