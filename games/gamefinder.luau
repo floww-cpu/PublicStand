@@ -3,7 +3,7 @@ local gameId = game.GameId
 
 local scripts = {
     [1008451066] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/dahood.luau",
-    [4924922222] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/brookhaven.luau",
+    [1686885941] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/brookhaven.luau",
 }
 
 
