@@ -3,8 +3,7 @@ local gameId = game.GameId
 
 local scripts = {
     [1008451066] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/dahood.luau",
-    [10449761463] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/thestrongestb.luau", -- the strongest battlegrounds
-    [3808081382] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/thestrongestb.luau", -- the strongest battlegrounds
+    [4924922222] = "https://raw.githubusercontent.com/floww-cpu/PublicStand/refs/heads/main/games/brookhaven.luau",
 }
 
 
